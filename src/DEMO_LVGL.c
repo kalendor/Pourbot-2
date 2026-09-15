@@ -10,10 +10,12 @@
 #include "display.h"
 #include "battery_gauge.h"
 #include "pour_archive.h"
+#include "ota_manager.h"
 #include "wifi_manager.h"
 #include "esp_heap_caps.h"
 #include "esp_bsp.h"
 #include "esp_log.h"
+#include "esp_ota_ops.h"
 #include "esp_rom_sys.h"
 #include "esp_sleep.h"
 #include "esp_system.h"
@@ -103,6 +105,7 @@ static char wifi_selected_ssid[33];
 static uint32_t wifi_scan_generation;
 static pourbot_wifi_status_t wifi_ui_status;
 static lv_obj_t *analytics_body, *analytics_status_label;
+static lv_obj_t *ota_status_label, *ota_progress_bar, *ota_install_button;
 static pour_archive_result_t *analytics_result;
 static uint32_t analytics_generation;
 static bool analytics_detail_open;
@@ -118,6 +121,7 @@ static int32_t last_saved_sample_weight;
 static bool current_pour_saved;
 static void wifi_event_cb(lv_event_t *event);
 static void analytics_event_cb(lv_event_t *event);
+static void settings_event_cb(lv_event_t *event);
 static void archive_current_pour(void);
 
 /* All battery UI state belongs to the LVGL mutex, including rebuilt recipe widgets. */
@@ -556,6 +560,9 @@ static void close_overlay(void)
     wifi_connect_button = NULL;
     analytics_body = NULL;
     analytics_status_label = NULL;
+    ota_status_label = NULL;
+    ota_progress_bar = NULL;
+    ota_install_button = NULL;
     if (menu_overlay) {
         calibration_status_label = NULL;
         calibration_weight_button = NULL;
@@ -810,6 +817,91 @@ static void calibration_event_cb(lv_event_t *event)
     lv_obj_align(calibration_status_label, LV_ALIGN_TOP_LEFT, 20, 231);
 }
 
+static void ota_ui_timer_cb(lv_timer_t *timer)
+{
+    (void)timer;
+    if (!ota_status_label || !ota_progress_bar) return;
+    pourbot_ota_status_t status;
+    pourbot_ota_status(&status);
+    lv_bar_set_value(ota_progress_bar, status.progress, LV_ANIM_ON);
+    if (status.available_version[0])
+        lv_label_set_text_fmt(ota_status_label, "CURRENT  %s     UPDATE  %s\n%s\n%u%%",
+            status.current_version, status.available_version, status.message, status.progress);
+    else
+        lv_label_set_text_fmt(ota_status_label, "CURRENT VERSION  %s\n%s\n%u%%",
+            status.current_version, status.message, status.progress);
+    if (ota_install_button) {
+        if (status.running) lv_obj_add_state(ota_install_button, LV_STATE_DISABLED);
+        else lv_obj_clear_state(ota_install_button, LV_STATE_DISABLED);
+    }
+}
+
+static void ota_install_event_cb(lv_event_t *event)
+{
+    (void)event;
+    if (brew_running || brew_elapsed_us > 0) {
+        lv_label_set_text(ota_status_label, "Reset the current brew before updating");
+        return;
+    }
+    if (!pourbot_ota_start()) {
+        lv_label_set_text(ota_status_label, "Update is already running or could not start");
+        return;
+    }
+    lv_obj_add_state(ota_install_button, LV_STATE_DISABLED);
+    ota_ui_timer_cb(NULL);
+}
+
+static void ota_event_cb(lv_event_t *event)
+{
+    (void)event;
+    close_overlay();
+    menu_overlay = lv_obj_create(lv_layer_top());
+    lv_obj_set_size(menu_overlay, 480, 320);
+    lv_obj_set_style_bg_color(menu_overlay, lv_color_hex(0x020305), 0);
+    lv_obj_set_style_bg_opa(menu_overlay, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(menu_overlay, 0, 0);
+    lv_obj_clear_flag(menu_overlay, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *title = lv_label_create(menu_overlay);
+    lv_label_set_text(title, "OTA UPDATE");
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_color(title, lv_color_hex(0xF8FAFC), 0);
+    lv_obj_align(title, LV_ALIGN_TOP_LEFT, 20, 18);
+    small_action_button(menu_overlay, "BACK", 386, 10, 78, 0x1F2937,
+                        settings_event_cb);
+
+    lv_obj_t *card = make_panel(menu_overlay, 440, 220, 0x05070B);
+    lv_obj_align(card, LV_ALIGN_TOP_MID, 0, 74);
+    lv_obj_set_style_border_width(card, 1, 0);
+    lv_obj_set_style_border_color(card, lv_color_hex(0x1F2937), 0);
+    lv_obj_t *info = lv_label_create(card);
+    lv_label_set_text(info,
+        "Installs firmware.bin from the latest\nPourbot-2 GitHub release. Keep USB power\nconnected throughout the update.");
+    lv_obj_set_width(info, 402);
+    lv_obj_set_style_text_font(info, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(info, lv_color_hex(0xCBD5E1), 0);
+    lv_obj_set_style_text_line_space(info, 3, 0);
+    lv_obj_align(info, LV_ALIGN_TOP_LEFT, 18, 14);
+
+    ota_progress_bar = lv_bar_create(card);
+    lv_obj_set_size(ota_progress_bar, 402, 12);
+    lv_obj_align(ota_progress_bar, LV_ALIGN_TOP_LEFT, 18, 89);
+    lv_bar_set_range(ota_progress_bar, 0, 100);
+    lv_obj_set_style_bg_color(ota_progress_bar, lv_color_hex(0x1F2937), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(ota_progress_bar, lv_color_hex(0xF2B94F), LV_PART_INDICATOR);
+
+    ota_status_label = lv_label_create(card);
+    lv_obj_set_width(ota_status_label, 402);
+    lv_obj_set_style_text_font(ota_status_label, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_color(ota_status_label, lv_color_hex(0xF8FAFC), 0);
+    lv_obj_set_style_text_align(ota_status_label, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_align(ota_status_label, LV_ALIGN_TOP_LEFT, 18, 111);
+    ota_install_button = small_action_button(card, "INSTALL LATEST", 115, 166, 210,
+                                              0xB7791F, ota_install_event_cb);
+    overlay_timer = lv_timer_create(ota_ui_timer_cb, 250, NULL);
+    ota_ui_timer_cb(NULL);
+}
+
 static void settings_event_cb(lv_event_t *event)
 {
     (void)event;
@@ -835,6 +927,8 @@ static void settings_event_cb(lv_event_t *event)
                         calibration_event_cb);
     small_action_button(card, "WI-FI SETUP", 18, 80, 210, 0x2563EB,
                         wifi_event_cb);
+    small_action_button(card, "OTA UPDATE", 18, 142, 210, 0xB7791F,
+                        ota_event_cb);
 }
 
 static void wifi_back_event_cb(lv_event_t *event)
@@ -2396,4 +2490,7 @@ void app_main(void)
     xTaskCreate(battery_task, "battery_task", 3072, NULL, 2, NULL);
     archive_ready = pour_archive_start();
     if (!pourbot_wifi_start()) ESP_LOGW(TAG, "Wi-Fi task unavailable");
+    /* The display, scale UI, workers, and networking have initialized. An OTA
+     * image that reached this checkpoint is healthy enough to keep. */
+    esp_ota_mark_app_valid_cancel_rollback();
 }

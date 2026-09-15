@@ -20,7 +20,7 @@ Settings opens touchscreen calibration: tare empty, enter a known mass, then cal
 
 ## Build
 
-Analytics stores chart snapshots on a FAT32 SD card and browses the latest 25 pours. Settings includes Wi-Fi setup for internet time. See [ANALYTICS.md](ANALYTICS.md) for save behavior, CSV format, offline timestamps, and the separate future OTA migration.
+Analytics stores chart snapshots on a FAT32 SD card and browses the latest 25 pours. Settings includes Wi-Fi setup for internet time and secure OTA updates. See [ANALYTICS.md](ANALYTICS.md) for save behavior, CSV format, and offline timestamps.
 
 Use PlatformIO environment `LVGL-320-480`. ESP-IDF requires a space-free build path: copy the project to a temporary folder without spaces, excluding `.pio`, then run:
 
@@ -30,5 +30,19 @@ pio run -d C:\Temp\pourbot-build -t upload --upload-port COM9
 ```
 
 Check the actual USB port before uploading. Normal uploads preserve NVS; do not erase flash unless saved data should be deleted.
+
+## OTA updates
+
+The first OTA-capable build must be flashed over USB because it installs the
+factory/OTA partition table and rollback-enabled bootloader. After that:
+
+1. Increase the version in the root `CMakeLists.txt`.
+2. Commit and push the change.
+3. Tag the commit (for example, `v1.0.1`) and push the tag.
+4. GitHub Actions builds a release and publishes `firmware.bin`.
+5. On PourBot, open **Menu > Settings > OTA Update > Install Latest**.
+
+Keep PourBot connected to USB power during an update. Downloads use HTTPS and
+the device retains the previous application image for automatic rollback.
 
 Application logic and scale pins: `src/DEMO_LVGL.c`. Recipes: `src/recipes.c`. Display pins: `src/display.h`. LVGL configuration: `src/lv_conf.h`. Keep the numeric font uncompressed (`bitmap_format = 0`).
