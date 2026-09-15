@@ -19,15 +19,21 @@
 static SemaphoreHandle_t ota_mutex;
 static pourbot_ota_status_t ota_status;
 
-static bool version_is_newer(const char *incoming, const char *current)
+/* Older builds accidentally embedded IDF's default version "1". */
+static bool parse_version(const char *text, unsigned parts[3])
 {
-    unsigned in_major, in_minor, in_patch, cur_major, cur_minor, cur_patch;
-    if (sscanf(incoming, "%u.%u.%u", &in_major, &in_minor, &in_patch) != 3 ||
-        sscanf(current, "%u.%u.%u", &cur_major, &cur_minor, &cur_patch) != 3)
-        return false;
-    if (in_major != cur_major) return in_major > cur_major;
-    if (in_minor != cur_minor) return in_minor > cur_minor;
-    return in_patch > cur_patch;
+    if (*text == 'v') ++text;
+    parts[0] = parts[1] = parts[2] = 0;
+    for (int i = 0; i < 3; ++i) {
+        if (*text < '0' || *text > '9') return false;
+        while (*text >= '0' && *text <= '9') {
+            if (parts[i] > 999999) return false;
+            parts[i] = parts[i] * 10 + (unsigned)(*text++ - '0');
+        }
+        if (!*text) return i == 2 || i == 0;
+        if (*text++ != '.' || i == 2) return false;
+    }
+    return false;
 }
 
 static void status_set(bool running, bool finished, bool ok, int progress,
@@ -81,12 +87,27 @@ static void ota_task(void *argument)
     strlcpy(ota_status.available_version, incoming.version,
             sizeof(ota_status.available_version));
     xSemaphoreGive(ota_mutex);
-    if (!version_is_newer(incoming.version, esp_app_get_description()->version)) {
+    unsigned remote[3], current[3];
+    if (!parse_version(incoming.version, remote) ||
+        !parse_version(esp_app_get_description()->version, current)) {
+        esp_https_ota_abort(handle);
+        status_set(false, true, false, 0, "Cannot compare firmware versions");
+        vTaskDelete(NULL);
+    }
+    int comparison = 0;
+    for (int i = 0; i < 3; ++i) {
+        if (remote[i] != current[i]) {
+            comparison = remote[i] > current[i] ? 1 : -1;
+            break;
+        }
+    }
+    if (comparison <= 0) {
         esp_https_ota_abort(handle);
         xSemaphoreTake(ota_mutex, portMAX_DELAY);
         ota_status.update_available = false;
         xSemaphoreGive(ota_mutex);
-        status_set(false, true, true, 0, "PourBot is already up to date");
+        status_set(false, true, true, 0, comparison == 0 ?
+                   "PourBot is already up to date" : "Installed version is newer than GitHub");
         vTaskDelete(NULL);
     }
     if (!install) {
@@ -118,7 +139,7 @@ static void ota_task(void *argument)
         vTaskDelete(NULL);
     }
     status_set(false, true, true, 100, "Update installed - restarting...");
-    vTaskDelay(pdMS_TO_TICKS(1200));
+    vTaskDelay(pdMS_TO_TICKS(2500));
     esp_restart();
 }
 

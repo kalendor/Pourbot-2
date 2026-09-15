@@ -20,6 +20,8 @@ jobs:
         run: pip install platformio
       - name: Build PourBot
         run: pio run -e LVGL-320-480
+      - name: Verify embedded release version
+        run: python tools/verify_firmware_version.py .pio/build/LVGL-320-480/firmware.bin "$GITHUB_REF_NAME"
       - name: Publish firmware.bin
         env:
           GH_TOKEN: ${{ github.token }}

@@ -106,6 +106,7 @@ static uint32_t wifi_scan_generation;
 static pourbot_wifi_status_t wifi_ui_status;
 static lv_obj_t *analytics_body, *analytics_status_label;
 static lv_obj_t *ota_status_label, *ota_progress_bar, *ota_install_button;
+static lv_obj_t *ota_check_button, *ota_version_table;
 static pour_archive_result_t *analytics_result;
 static uint32_t analytics_generation;
 static bool analytics_detail_open;
@@ -563,6 +564,8 @@ static void close_overlay(void)
     ota_status_label = NULL;
     ota_progress_bar = NULL;
     ota_install_button = NULL;
+    ota_check_button = NULL;
+    ota_version_table = NULL;
     if (menu_overlay) {
         calibration_status_label = NULL;
         calibration_weight_button = NULL;
@@ -824,20 +827,22 @@ static void ota_ui_timer_cb(lv_timer_t *timer)
     pourbot_ota_status_t status;
     pourbot_ota_status(&status);
     lv_bar_set_value(ota_progress_bar, status.progress, LV_ANIM_ON);
-    if (status.available_version[0])
-        lv_label_set_text_fmt(ota_status_label, "CURRENT  %s     UPDATE  %s\n%s\n%u%%",
-            status.current_version, status.available_version, status.message, status.progress);
-    else
-        lv_label_set_text_fmt(ota_status_label, "CURRENT VERSION  %s\n%s\n%u%%",
-            status.current_version, status.message, status.progress);
-    if (ota_install_button) {
-        lv_obj_t *label = lv_obj_get_child(ota_install_button, 0);
-        lv_label_set_text(label, status.update_available ? "UPDATE POURBOT" : "CHECK FOR UPDATES");
-        lv_obj_set_style_bg_color(ota_install_button,
-            lv_color_hex(status.update_available ? 0x16A34A : 0x2563EB), 0);
-        if (status.running) lv_obj_add_state(ota_install_button, LV_STATE_DISABLED);
-        else lv_obj_clear_state(ota_install_button, LV_STATE_DISABLED);
+    lv_table_set_cell_value(ota_version_table, 1, 0, status.current_version);
+    lv_table_set_cell_value(ota_version_table, 1, 1,
+        status.available_version[0] ? status.available_version : "--");
+    lv_label_set_text_fmt(ota_status_label, "%s  %u%%", status.message, status.progress);
+    bool installed = status.finished && status.ok && status.progress == 100;
+    lv_obj_set_style_bg_color(ota_install_button,
+        lv_color_hex(installed ? 0x16A34A : 0x2563EB), 0);
+    if (status.running || !status.update_available)
+        lv_obj_add_state(ota_install_button, LV_STATE_DISABLED);
+    else lv_obj_clear_state(ota_install_button, LV_STATE_DISABLED);
+    if (installed) {
+        lv_obj_clear_state(ota_install_button, LV_STATE_DISABLED);
+        lv_obj_clear_flag(ota_install_button, LV_OBJ_FLAG_CLICKABLE);
     }
+    if (status.running || installed) lv_obj_add_state(ota_check_button, LV_STATE_DISABLED);
+    else lv_obj_clear_state(ota_check_button, LV_STATE_DISABLED);
 }
 
 static void ota_install_event_cb(lv_event_t *event)
@@ -847,9 +852,8 @@ static void ota_install_event_cb(lv_event_t *event)
         lv_label_set_text(ota_status_label, "Reset the current brew before updating");
         return;
     }
-    pourbot_ota_status_t status;
-    pourbot_ota_status(&status);
-    bool started = status.update_available ? pourbot_ota_install() : pourbot_ota_check();
+    bool install = lv_event_get_target(event) == ota_install_button;
+    bool started = install ? pourbot_ota_install() : pourbot_ota_check();
     if (!started) {
         lv_label_set_text(ota_status_label, "Update is already running or could not start");
         return;
@@ -881,18 +885,28 @@ static void ota_event_cb(lv_event_t *event)
     lv_obj_align(card, LV_ALIGN_TOP_MID, 0, 74);
     lv_obj_set_style_border_width(card, 1, 0);
     lv_obj_set_style_border_color(card, lv_color_hex(0x1F2937), 0);
-    lv_obj_t *info = lv_label_create(card);
-    lv_label_set_text(info,
-        "Installs firmware.bin from the latest\nPourbot-2 GitHub release. Keep USB power\nconnected throughout the update.");
-    lv_obj_set_width(info, 402);
-    lv_obj_set_style_text_font(info, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_color(info, lv_color_hex(0xCBD5E1), 0);
-    lv_obj_set_style_text_line_space(info, 3, 0);
-    lv_obj_align(info, LV_ALIGN_TOP_LEFT, 18, 14);
+    ota_version_table = lv_table_create(card);
+    lv_obj_set_pos(ota_version_table, 18, 6);
+    lv_table_set_col_cnt(ota_version_table, 2);
+    lv_table_set_row_cnt(ota_version_table, 2);
+    lv_table_set_col_width(ota_version_table, 0, 201);
+    lv_table_set_col_width(ota_version_table, 1, 201);
+    lv_obj_set_style_bg_color(ota_version_table, lv_color_hex(0x05070B), LV_PART_ITEMS);
+    lv_obj_set_style_text_color(ota_version_table, lv_color_hex(0xF8FAFC), LV_PART_ITEMS);
+    lv_obj_set_style_text_font(ota_version_table, &lv_font_montserrat_18, LV_PART_ITEMS);
+    lv_obj_set_style_text_align(ota_version_table, LV_TEXT_ALIGN_CENTER, LV_PART_ITEMS);
+    lv_obj_set_style_pad_ver(ota_version_table, 4, LV_PART_ITEMS);
+    lv_obj_set_style_border_color(ota_version_table, lv_color_hex(0x1F2937), LV_PART_ITEMS);
+    lv_obj_set_style_border_width(ota_version_table, 1, LV_PART_ITEMS);
+    lv_obj_set_style_pad_all(ota_version_table, 0, LV_PART_MAIN);
+    lv_obj_set_style_border_width(ota_version_table, 0, LV_PART_MAIN);
+    lv_obj_clear_flag(ota_version_table, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+    lv_table_set_cell_value(ota_version_table, 0, 0, "Current version");
+    lv_table_set_cell_value(ota_version_table, 0, 1, "Check");
 
     ota_progress_bar = lv_bar_create(card);
-    lv_obj_set_size(ota_progress_bar, 402, 12);
-    lv_obj_align(ota_progress_bar, LV_ALIGN_TOP_LEFT, 18, 89);
+    lv_obj_set_size(ota_progress_bar, 402, 10);
+    lv_obj_align(ota_progress_bar, LV_ALIGN_TOP_LEFT, 18, 73);
     lv_bar_set_range(ota_progress_bar, 0, 100);
     lv_obj_set_style_bg_color(ota_progress_bar, lv_color_hex(0x1F2937), LV_PART_MAIN);
     lv_obj_set_style_bg_color(ota_progress_bar, lv_color_hex(0x22C55E), LV_PART_INDICATOR);
@@ -902,13 +916,11 @@ static void ota_event_cb(lv_event_t *event)
     lv_obj_set_style_text_font(ota_status_label, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(ota_status_label, lv_color_hex(0xF8FAFC), 0);
     lv_obj_set_style_text_align(ota_status_label, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(ota_status_label, LV_ALIGN_TOP_LEFT, 18, 111);
-    ota_install_button = small_action_button(card, "CHECK FOR UPDATES", 80, 158, 280,
-                                              0x2563EB, ota_install_event_cb);
-    lv_obj_set_height(ota_install_button, 54);
-    /* Keep the visual proportions tidy while making imperfect touchscreen
-     * presses around every edge count as a button press. */
-    lv_obj_set_ext_click_area(ota_install_button, 12);
+    lv_obj_align(ota_status_label, LV_ALIGN_TOP_LEFT, 18, 89);
+    ota_check_button = small_action_button(card, "CHECK FOR UPDATES", 18, 119, 402,
+                                           0x2563EB, ota_install_event_cb);
+    ota_install_button = small_action_button(card, "DOWNLOAD AND INSTALL UPDATE", 18, 169, 402,
+                                             0x2563EB, ota_install_event_cb);
     overlay_timer = lv_timer_create(ota_ui_timer_cb, 250, NULL);
     ota_ui_timer_cb(NULL);
 }
