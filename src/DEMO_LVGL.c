@@ -871,6 +871,7 @@ static void ota_event_cb(lv_event_t *event)
     lv_obj_set_style_bg_color(menu_overlay, lv_color_hex(0x020305), 0);
     lv_obj_set_style_bg_opa(menu_overlay, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(menu_overlay, 0, 0);
+    lv_obj_set_style_pad_all(menu_overlay, 0, 0);
     lv_obj_clear_flag(menu_overlay, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t *title = lv_label_create(menu_overlay);
@@ -881,8 +882,8 @@ static void ota_event_cb(lv_event_t *event)
     small_action_button(menu_overlay, "BACK", 386, 10, 78, 0x1F2937,
                         settings_event_cb);
 
-    lv_obj_t *card = make_panel(menu_overlay, 440, 220, 0x05070B);
-    lv_obj_align(card, LV_ALIGN_TOP_MID, 0, 74);
+    lv_obj_t *card = make_panel(menu_overlay, 440, 240, 0x05070B);
+    lv_obj_align(card, LV_ALIGN_TOP_MID, 0, 66);
     lv_obj_set_style_border_width(card, 1, 0);
     lv_obj_set_style_border_color(card, lv_color_hex(0x1F2937), 0);
     ota_version_table = lv_table_create(card);
@@ -919,8 +920,11 @@ static void ota_event_cb(lv_event_t *event)
     lv_obj_align(ota_status_label, LV_ALIGN_TOP_LEFT, 18, 89);
     ota_check_button = small_action_button(card, "CHECK FOR UPDATES", 18, 119, 402,
                                            0x2563EB, ota_install_event_cb);
-    ota_install_button = small_action_button(card, "DOWNLOAD AND INSTALL UPDATE", 18, 169, 402,
+    ota_install_button = small_action_button(card, "DOWNLOAD AND INSTALL UPDATE", 18, 178, 402,
                                              0x2563EB, ota_install_event_cb);
+    lv_obj_set_height(ota_install_button, 50);
+    /* A 422 x 70 touch target, contained in the card and separated from Check. */
+    lv_obj_set_ext_click_area(ota_install_button, 10);
     overlay_timer = lv_timer_create(ota_ui_timer_cb, 250, NULL);
     ota_ui_timer_cb(NULL);
 }
