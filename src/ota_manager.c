@@ -19,6 +19,17 @@
 static SemaphoreHandle_t ota_mutex;
 static pourbot_ota_status_t ota_status;
 
+static bool version_is_newer(const char *incoming, const char *current)
+{
+    unsigned in_major, in_minor, in_patch, cur_major, cur_minor, cur_patch;
+    if (sscanf(incoming, "%u.%u.%u", &in_major, &in_minor, &in_patch) != 3 ||
+        sscanf(current, "%u.%u.%u", &cur_major, &cur_minor, &cur_patch) != 3)
+        return false;
+    if (in_major != cur_major) return in_major > cur_major;
+    if (in_minor != cur_minor) return in_minor > cur_minor;
+    return in_patch > cur_patch;
+}
+
 static void status_set(bool running, bool finished, bool ok, int progress,
                        const char *message)
 {
@@ -33,7 +44,7 @@ static void status_set(bool running, bool finished, bool ok, int progress,
 
 static void ota_task(void *argument)
 {
-    (void)argument;
+    const bool install = (bool)(uintptr_t)argument;
     pourbot_wifi_status_t wifi;
     pourbot_wifi_status(&wifi);
     if (!wifi.connected) {
@@ -70,9 +81,20 @@ static void ota_task(void *argument)
     strlcpy(ota_status.available_version, incoming.version,
             sizeof(ota_status.available_version));
     xSemaphoreGive(ota_mutex);
-    if (!strcmp(incoming.version, esp_app_get_description()->version)) {
+    if (!version_is_newer(incoming.version, esp_app_get_description()->version)) {
         esp_https_ota_abort(handle);
-        status_set(false, true, true, 100, "PourBot is already up to date");
+        xSemaphoreTake(ota_mutex, portMAX_DELAY);
+        ota_status.update_available = false;
+        xSemaphoreGive(ota_mutex);
+        status_set(false, true, true, 0, "PourBot is already up to date");
+        vTaskDelete(NULL);
+    }
+    if (!install) {
+        esp_https_ota_abort(handle);
+        xSemaphoreTake(ota_mutex, portMAX_DELAY);
+        ota_status.update_available = true;
+        xSemaphoreGive(ota_mutex);
+        status_set(false, true, true, 0, "New firmware is ready to install");
         vTaskDelete(NULL);
     }
 
@@ -100,7 +122,7 @@ static void ota_task(void *argument)
     esp_restart();
 }
 
-bool pourbot_ota_start(void)
+static bool ota_start(bool install)
 {
     if (!ota_mutex) {
         ota_mutex = xSemaphoreCreateMutex();
@@ -112,21 +134,29 @@ bool pourbot_ota_start(void)
     }
     xSemaphoreTake(ota_mutex, portMAX_DELAY);
     bool busy = ota_status.running;
+    bool available = ota_status.update_available;
+    if (install && !available) busy = true;
     if (!busy) {
         ota_status.running = true;
         ota_status.finished = false;
         ota_status.ok = false;
         ota_status.progress = 0;
-        ota_status.available_version[0] = 0;
+        if (!install) {
+            ota_status.update_available = false;
+            ota_status.available_version[0] = 0;
+        }
     }
     xSemaphoreGive(ota_mutex);
     if (busy) return false;
-    if (xTaskCreate(ota_task, "pour_ota", 8192, NULL, 2, NULL) != pdPASS) {
+    if (xTaskCreate(ota_task, "pour_ota", 8192, (void *)(uintptr_t)install, 2, NULL) != pdPASS) {
         status_set(false, true, false, 0, "Not enough memory to start update");
         return false;
     }
     return true;
 }
+
+bool pourbot_ota_check(void) { return ota_start(false); }
+bool pourbot_ota_install(void) { return ota_start(true); }
 
 void pourbot_ota_status(pourbot_ota_status_t *status)
 {

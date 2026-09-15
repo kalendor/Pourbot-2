@@ -831,6 +831,10 @@ static void ota_ui_timer_cb(lv_timer_t *timer)
         lv_label_set_text_fmt(ota_status_label, "CURRENT VERSION  %s\n%s\n%u%%",
             status.current_version, status.message, status.progress);
     if (ota_install_button) {
+        lv_obj_t *label = lv_obj_get_child(ota_install_button, 0);
+        lv_label_set_text(label, status.update_available ? "UPDATE POURBOT" : "CHECK FOR UPDATES");
+        lv_obj_set_style_bg_color(ota_install_button,
+            lv_color_hex(status.update_available ? 0x16A34A : 0x2563EB), 0);
         if (status.running) lv_obj_add_state(ota_install_button, LV_STATE_DISABLED);
         else lv_obj_clear_state(ota_install_button, LV_STATE_DISABLED);
     }
@@ -843,7 +847,10 @@ static void ota_install_event_cb(lv_event_t *event)
         lv_label_set_text(ota_status_label, "Reset the current brew before updating");
         return;
     }
-    if (!pourbot_ota_start()) {
+    pourbot_ota_status_t status;
+    pourbot_ota_status(&status);
+    bool started = status.update_available ? pourbot_ota_install() : pourbot_ota_check();
+    if (!started) {
         lv_label_set_text(ota_status_label, "Update is already running or could not start");
         return;
     }
@@ -888,7 +895,7 @@ static void ota_event_cb(lv_event_t *event)
     lv_obj_align(ota_progress_bar, LV_ALIGN_TOP_LEFT, 18, 89);
     lv_bar_set_range(ota_progress_bar, 0, 100);
     lv_obj_set_style_bg_color(ota_progress_bar, lv_color_hex(0x1F2937), LV_PART_MAIN);
-    lv_obj_set_style_bg_color(ota_progress_bar, lv_color_hex(0xF2B94F), LV_PART_INDICATOR);
+    lv_obj_set_style_bg_color(ota_progress_bar, lv_color_hex(0x22C55E), LV_PART_INDICATOR);
 
     ota_status_label = lv_label_create(card);
     lv_obj_set_width(ota_status_label, 402);
@@ -896,8 +903,8 @@ static void ota_event_cb(lv_event_t *event)
     lv_obj_set_style_text_color(ota_status_label, lv_color_hex(0xF8FAFC), 0);
     lv_obj_set_style_text_align(ota_status_label, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_align(ota_status_label, LV_ALIGN_TOP_LEFT, 18, 111);
-    ota_install_button = small_action_button(card, "INSTALL LATEST", 115, 166, 210,
-                                              0xB7791F, ota_install_event_cb);
+    ota_install_button = small_action_button(card, "CHECK FOR UPDATES", 105, 166, 230,
+                                              0x2563EB, ota_install_event_cb);
     overlay_timer = lv_timer_create(ota_ui_timer_cb, 250, NULL);
     ota_ui_timer_cb(NULL);
 }

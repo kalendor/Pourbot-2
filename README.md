@@ -40,7 +40,8 @@ factory/OTA partition table and rollback-enabled bootloader. After that:
 2. Commit and push the change.
 3. Tag the commit (for example, `v1.0.1`) and push the tag.
 4. GitHub Actions builds a release and publishes `firmware.bin`.
-5. On PourBot, open **Menu > Settings > OTA Update > Install Latest**.
+5. On PourBot, open **Menu > Settings > OTA Update**, tap **Check for Updates**,
+   then tap the green **Update PourBot** button.
 
 Keep PourBot connected to USB power during an update. Downloads use HTTPS and
 the device retains the previous application image for automatic rollback.
