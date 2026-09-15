@@ -4,7 +4,6 @@
 #include "nvs.h"
 
 static pourbot_recipe_t recipes[POURBOT_RECIPE_COUNT] = {
-    {"Hoffmann 1-Cup V60", 15, 167, 45, 10, 5},
     {"Kasuya 4:6 V60",     20, 150, 45, 45, 5},
     {"Onyx V60",           20, 150, 30, 20, 5},
     {"Chemex Classic",      30, 167, 30, 45, 3},
@@ -21,9 +20,23 @@ void pourbot_recipes_load(void)
     nvs_handle_t handle;
     if (nvs_open("recipes", NVS_READONLY, &handle) != ESP_OK) return;
     size_t size = sizeof(recipes);
-    nvs_get_blob(handle, "presets", recipes, &size);
     uint8_t selected = 0;
-    if (nvs_get_u8(handle, "active", &selected) == ESP_OK && selected < POURBOT_RECIPE_COUNT) {
+    pourbot_recipe_t stored[POURBOT_RECIPE_COUNT];
+    if (nvs_get_blob(handle, "presets_v2", stored, &size) == ESP_OK && size == sizeof(stored)) {
+        memcpy(recipes, stored, sizeof(recipes));
+        nvs_get_u8(handle, "active_v2", &selected);
+    } else {
+        /* Original four-preset layout: drop slot zero while preserving edits
+         * and the selected identity of the remaining three recipes. */
+        pourbot_recipe_t legacy[4];
+        size = sizeof(legacy);
+        if (nvs_get_blob(handle, "presets", legacy, &size) == ESP_OK && size == sizeof(legacy))
+            memcpy(recipes, &legacy[1], sizeof(recipes));
+        uint8_t previous = 0;
+        if (nvs_get_u8(handle, "active", &previous) == ESP_OK && previous > 0 && previous < 4)
+            selected = previous - 1;
+    }
+    if (selected < POURBOT_RECIPE_COUNT) {
         active_index = selected;
     }
     nvs_close(handle);
@@ -33,8 +46,8 @@ static void persist(void)
 {
     nvs_handle_t handle;
     if (nvs_open("recipes", NVS_READWRITE, &handle) != ESP_OK) return;
-    nvs_set_blob(handle, "presets", recipes, sizeof(recipes));
-    nvs_set_u8(handle, "active", active_index);
+    nvs_set_blob(handle, "presets_v2", recipes, sizeof(recipes));
+    nvs_set_u8(handle, "active_v2", active_index);
     nvs_commit(handle);
     nvs_close(handle);
 }

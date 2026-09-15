@@ -903,8 +903,12 @@ static void ota_event_cb(lv_event_t *event)
     lv_obj_set_style_text_color(ota_status_label, lv_color_hex(0xF8FAFC), 0);
     lv_obj_set_style_text_align(ota_status_label, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_align(ota_status_label, LV_ALIGN_TOP_LEFT, 18, 111);
-    ota_install_button = small_action_button(card, "CHECK FOR UPDATES", 105, 166, 230,
+    ota_install_button = small_action_button(card, "CHECK FOR UPDATES", 80, 158, 280,
                                               0x2563EB, ota_install_event_cb);
+    lv_obj_set_height(ota_install_button, 54);
+    /* Keep the visual proportions tidy while making imperfect touchscreen
+     * presses around every edge count as a button press. */
+    lv_obj_set_ext_click_area(ota_install_button, 12);
     overlay_timer = lv_timer_create(ota_ui_timer_cb, 250, NULL);
     ota_ui_timer_cb(NULL);
 }

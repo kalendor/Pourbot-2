@@ -2,7 +2,7 @@
 
 #include <stdint.h>
 
-#define POURBOT_RECIPE_COUNT 4
+#define POURBOT_RECIPE_COUNT 3
 
 typedef struct {
     char name[24];
