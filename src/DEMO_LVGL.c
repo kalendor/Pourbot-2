@@ -1576,12 +1576,6 @@ static void create_ui(void)
     lv_obj_set_style_text_color(quick_title, lv_color_hex(0xF8FAFC), 0);
     lv_obj_align(quick_title, LV_ALIGN_TOP_MID, 0, 28);
 
-    lv_obj_t *quick_hint = lv_label_create(quick_screen);
-    lv_label_set_text(quick_hint, "POWER CONTROLS");
-    lv_obj_set_style_text_font(quick_hint, &lv_font_montserrat_12, 0);
-    lv_obj_set_style_text_color(quick_hint, lv_color_hex(0x94A3B8), 0);
-    lv_obj_align(quick_hint, LV_ALIGN_TOP_MID, 0, 59);
-
     lv_obj_t *reboot = small_action_button(quick_screen,
                                             LV_SYMBOL_REFRESH "  REBOOT",
                                             24, 96, 204, 0x334155,

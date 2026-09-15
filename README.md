@@ -38,7 +38,7 @@ factory/OTA partition table and rollback-enabled bootloader. After that:
 
 1. Increase the version in the root `CMakeLists.txt`.
 2. Commit and push the change.
-3. Tag the commit (for example, `v1.0.1`) and push the tag.
+3. Tag the commit (for example, `v1.2.0`) and push the tag.
 4. GitHub Actions builds a release and publishes `firmware.bin`.
 5. On PourBot, open **Menu > Settings > OTA Update**, tap **Check for Updates**,
    then tap the green **Update PourBot** button.
