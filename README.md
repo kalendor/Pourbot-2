@@ -2,6 +2,12 @@
 
 ESP-IDF firmware for the Guition JC3248W535C ESP32-S3 display and HX711 scale. LVGL 8.4 drives the 480x320 landscape touchscreen using software rotation.
 
+## Website and browser installer
+
+Visit [PourBot](https://kalendor.github.io/Pourbot-2/) for features and the latest firmware installer. Use desktop Chrome or Edge with a USB data cable. The full browser installation resets saved calibration, recipes and Wi-Fi settings; use on-device OTA for routine updates that preserve settings.
+
+Each version-tag release builds and verifies firmware, packages the matching bootloader and partitions, and deploys the site and installer together through GitHub Pages. Generated installer binaries are not committed to Git.
+
 ## Wiring
 
 - HX711 DOUT: GPIO17; SCK: GPIO18; supply: 3.3V and GND.

@@ -7,6 +7,8 @@ on:
 
 permissions:
   contents: write
+  pages: write
+  id-token: write
 
 jobs:
   firmware:
@@ -30,3 +32,28 @@ jobs:
           .pio/build/LVGL-320-480/firmware.bin#firmware.bin
           --title "PourBot $GITHUB_REF_NAME"
           --generate-notes
+      - name: Prepare browser installer
+        run: python tools/prepare_web_installer.py "$GITHUB_REF_NAME"
+      - name: Attach full USB image to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$GITHUB_REF_NAME" site/firmware/*.bin
+      - uses: actions/configure-pages@v5
+        with:
+          enablement: true
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+  website:
+    needs: firmware
+    runs-on: ubuntu-latest
+    concurrency:
+      group: github-pages
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy PourBot website
+        id: deployment
+        uses: actions/deploy-pages@v4
