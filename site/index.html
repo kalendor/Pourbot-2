@@ -1,7 +1,116 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="description" content="PourBot: an open-source touchscreen pour-over coffee scale. Explore features and install the latest firmware from your browser."><title>PourBot — Find your flow</title><link rel="stylesheet" href="style.css"><script type="module" src="https://unpkg.com/esp-web-tools@10.1.0/dist/web/install-button.js?module"></script></head>
-<body><header><a class="brand" href="#">Pour<span>Bot</span></a><nav><a href="#features">Features</a><a href="#install">Install</a><a href="https://github.com/kalendor/Pourbot-2">GitHub ↗</a></nav></header>
-<main><section class="hero"><div><p class="eyebrow">OPEN SOURCE · BUILT FOR POUR-OVER</p><h1>Good coffee.<br>One pour at<br><em>a time.</em></h1><p class="intro">Meet PourBot. A touchscreen coffee scale that brings your weight, flow and brew time into focus.</p><a class="button" href="#install">Get PourBot <span>↗</span></a><a class="textlink" href="#features">Explore the features ↓</a></div><div class="device" aria-label="Illustration of the PourBot brewing display"><div class="device-top"><b>Pour<span>Bot</span></b><span>Kasuya 4:6 V60</span></div><div class="dots">● ○ ○</div><div class="dial"><div class="reading">248.6 <small>g</small><p>02:15</p><small class="flow">4.2 g/s</small></div></div><div class="controls"><span>↻ TARE</span><span>Ⅱ PAUSE</span></div><p class="caption">Illustrative display · made for the countertop</p></div></section>
-<section id="features"><p class="eyebrow">A LITTLE MORE INTENTION IN EVERY CUP</p><h2>See your brew come together.</h2><div class="grid"><article><span class="number">01 / MEASURE</span><h3>Weight. Flow. Time.</h3><p>A clear landscape display with live weight and flow, a brew timer, and a chart that grows with your pour.</p></article><article><span class="number">02 / REPEAT</span><h3>Your recipe, remembered.</h3><p>Kasuya 4:6 V60, Onyx V60 and Chemex Classic. Edit dose, ratio and hold times on the screen. PourBot remembers your selection.</p></article><article><span class="number">03 / REFLECT</span><h3>Keep the good pours.</h3><p>Save brew traces to a FAT32 microSD card. Browse your latest 25 pours and review weight and flow over time.</p></article><article><span class="number">04 / MAKE IT YOURS</span><h3>Built to keep improving.</h3><p>Touchscreen calibration, Wi-Fi time synchronization, deep-sleep standby and firmware updates directly on PourBot.</p></article></div></section>
-<section class="hardware"><div><p class="eyebrow">THE HARDWARE</p><h2>A small build.<br>A daily ritual.</h2></div><div><p>Designed for the <strong>Guition JC3248W535C ESP32-S3</strong> with a 480 × 320 landscape touchscreen, an HX711 amplifier and a load cell.</p><p>Add a microSD card for brew history, a GPIO6 wake button for standby, and an optional MAX17048 fuel gauge for battery level.</p><a class="textlink" href="https://github.com/kalendor/Pourbot-2#wiring">Wiring &amp; build documentation ↗</a></div></section>
-<section id="install" class="install"><p class="eyebrow">READY WHEN YOU ARE</p><h2>Fresh firmware.<br>Right from your browser.</h2><p id="version" role="status">Loading release information…</p><ol><li>Connect a compatible PourBot board with a USB data cable.</li><li>Open this page in desktop Chrome or Edge and close any serial monitors.</li><li>Select Connect &amp; Install, choose the board and follow the installer.</li></ol><p class="notice">For the JC3248W535C board only. A browser installation writes the bootloader and partition layout. This full USB image resets saved calibration, recipes and Wi-Fi settings. For an existing working scale, use Settings → OTA Update to keep your settings.</p><esp-web-install-button id="installer" hidden><button class="button" slot="activate">Connect &amp; Install ↗</button><p slot="unsupported">Use a desktop browser with Web Serial support, such as Chrome or Edge.</p><p slot="not-allowed">Open the HTTPS version of this page to install.</p></esp-web-install-button><p>After installation, leave the platform empty for startup tare, then calibrate using a known weight. Configure Wi-Fi from Settings.</p><a class="textlink" href="https://github.com/kalendor/Pourbot-2/releases/latest">Release notes &amp; downloads ↗</a></section></main><footer><a class="brand" href="#">Pour<span>Bot</span></a><p>Good coffee. Brighter days.</p><a href="https://esphome.github.io/esp-web-tools/">Installer powered by ESP Web Tools</a></footer><script src="app.js"></script></body></html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8">
+			<meta name="viewport" content="width=device-width,initial-scale=1">
+				<meta name="description" content="PourBot: a touchscreen pour-over coffee scale. Explore features and install the latest firmware from your browser.">
+					<title>PourBot — Find your flow</title>
+					<link rel="stylesheet" href="style.css">
+						<script type="module" src="https://unpkg.com/esp-web-tools@10.1.0/dist/web/install-button.js?module"/>
+					</head>
+					<body>
+						<header>
+							<a class="brand" href="#">Pour<span>Bot</span>
+							</a>
+							<nav>
+								<a href="#features">Features</a>
+								<a href="#install">Install</a>
+								<a href="https://github.com/kalendor/Pourbot-2">GitHub ↗</a>
+							</nav>
+						</header>
+						<main>
+							<section class="hero">
+								<div>
+									<p class="eyebrow">BUILT FOR POUR-OVER</p>
+									<h1>Good coffee.<br>One pour at<br>
+												<em>a time.</em>
+											</h1>
+											<p class="intro">Meet PourBot. A touchscreen coffee scale that brings your weight, flow and brew time into focus.</p>
+											<a class="button" href="#install">Get PourBot <span>↗</span>
+											</a>
+											<a class="textlink" href="#features">Explore the features ↓</a>
+										</div>
+										<div class="device" aria-label="Illustration of the PourBot brewing display">
+											<div class="device-top">
+												<b>Pour<span>Bot</span>
+												</b>
+												<span>Kasuya 4:6 V60</span>
+											</div>
+											<div class="dots">● ○ ○</div>
+											<div class="dial">
+												<div class="reading">248.6 <small>g</small>
+													<p>02:15</p>
+													<small class="flow">4.2 g/s</small>
+												</div>
+											</div>
+											<div class="controls">
+												<span>↻ TARE</span>
+												<span>Ⅱ PAUSE</span>
+											</div>
+											<p class="caption">Illustrative display · made for the countertop</p>
+										</div>
+									</section>
+									<section id="features">
+										<p class="eyebrow">IT'S THE DETAILS THAT MATTER</p>
+										<h2>See your brew come together.</h2>
+										<div class="grid">
+											<article>
+												<span class="number">01 / MEASURE</span>
+												<h3>Weight. Flow. Time.</h3>
+												<p>A clear landscape display with live weight and flow, a brew timer, with analytics to diagnose your pour.</p>
+											</article>
+											<article>
+												<span class="number">02 / REPEAT</span>
+												<h3>Your recipe, remembered.</h3>
+												<p>Kasuya 4:6 V60, Onyx V60 and Chemex Classic. Edit dose, ratio and hold times on the screen. PourBot remembers your selection.</p>
+											</article>
+											<article>
+												<span class="number">03 / REFLECT</span>
+												<h3>Save the good brews.</h3>
+												<p>Save your best brews to a microSD card. Browse your latest 25 pours and review weight and flow over time.</p>
+											</article>
+											<article>
+												<span class="number">04 / ALLWAYS UPDATED</span>
+												<h3>Built to keep improving.</h3>
+												<p>Touchscreen calibration, Wi-Fi, and OTA firmware updates directly on PourBot.</p>
+											</article>
+										</div>
+									</section>
+									<section class="hardware">
+										<div>
+											<p class="eyebrow">THE HARDWARE</p>
+											<h2>Small<br>But Mighty</h2>
+											</div>
+											<div>
+												<p>Designed for the <strong>Guition JC3248W535C ESP32-S3</strong> with a 480 × 320 landscape touchscreen, an HX711 amplifier and a load cell.</p>
+												<p>Add a microSD card for brew history,and an optional MAX17048 fuel gauge for battery level.</p>
+												<a class="textlink" href="https://github.com/kalendor/Pourbot-2#wiring">Wiring &amp; build documentation ↗</a>
+											</div>
+										</section>
+										<section id="install" class="install">
+											<p class="eyebrow">READY TO INSTALL?</p>
+											<h2>Fresh firmware.<br>Right from your browser.</h2>
+												<p id="version" role="status">Loading release information…</p>
+												<ol>
+													<li>Connect a compatible PourBot board with a USB data cable.</li>
+													<li>Open this page in desktop Chrome or Edge and close any serial monitors.</li>
+													<li>Select Connect &amp; Install, choose the board and follow the installer.</li>
+												</ol>
+												<p class="notice">For the JC3248W535C board only. A browser installation writes the bootloader and partition layout. This full USB image resets saved calibration, recipes and Wi-Fi settings. For an existing working scale, use Settings → OTA Update to keep your settings.</p>
+												<esp-web-install-button id="installer" hidden><button class="button" slot="activate">Connect &amp; Install ↗</button>
+												<p slot="unsupported">Use a desktop browser with Web Serial support, such as Chrome or Edge.</p>
+												<p slot="not-allowed">Open the HTTPS version of this page to install.</p>
+											</esp-web-install-button>
+											<p>After installation, leave the platform empty for startup tare, then calibrate using a known weight. Configure Wi-Fi from Settings.</p>
+											<a class="textlink" href="https://github.com/kalendor/Pourbot-2/releases/latest">Release notes &amp; downloads ↗</a>
+										</section>
+									</main>
+									<footer>
+										<a class="brand" href="#">Pour<span>Bot</span>
+										</a>
+										<p>Good coffee. Brighter days.</p>
+										<a href="https://esphome.github.io/esp-web-tools/">Installer powered by ESP Web Tools</a>
+									</footer>
+									<script src="app.js"/>
+								</body>
+							</html>
