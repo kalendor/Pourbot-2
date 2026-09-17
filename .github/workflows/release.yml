@@ -37,7 +37,7 @@ jobs:
       - name: Attach full USB image to release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$GITHUB_REF_NAME" site/firmware/*.bin
+        run: gh release upload "$GITHUB_REF_NAME" site/firmware/pourbot-*.bin
       - uses: actions/configure-pages@v5
         with:
           enablement: true
