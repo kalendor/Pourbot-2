@@ -229,6 +229,29 @@ static void archive_current_pour(void)
         if (analytics_status_label) lv_label_set_text(analytics_status_label, "No recorded pour to save");
         return;
     }
+    /* The periodic chart sample can trail a pause/reset by up to 500 ms.
+     * Capture the actual endpoint before copying the session to the SD job so
+     * FINAL and the recorded duration include the complete pour. */
+    int64_t elapsed = brew_elapsed_us;
+    if (brew_running) elapsed += esp_timer_get_time() - brew_started_us;
+    uint32_t terminal_seconds = elapsed > chart_start_elapsed_us
+        ? (uint32_t)((elapsed - chart_start_elapsed_us) / 1000000) : 0;
+    int32_t terminal_weight = stable_weight_tenths == INT32_MIN ? 0
+        : (stable_weight_tenths >= 0 ? stable_weight_tenths + 5 : stable_weight_tenths - 5) / 10;
+    int32_t terminal_flow = (int32_t)(scale_flow_gps * 10.0f + 0.5f);
+    if (terminal_weight < 0) terminal_weight = 0;
+    if (terminal_flow < 0) terminal_flow = 0;
+    unsigned endpoint = chart_history_count;
+    if (endpoint >= CHART_HISTORY_MAX ||
+        chart_time_history[chart_history_count - 1] == terminal_seconds) {
+        endpoint = chart_history_count - 1;
+    } else {
+        chart_history_count++;
+    }
+    chart_time_history[endpoint] = terminal_seconds;
+    chart_weight_history[endpoint] = terminal_weight;
+    chart_flow_history[endpoint] = terminal_flow;
+
     unsigned last = chart_history_count - 1;
     if (current_pour_saved && last_saved_sample_count == chart_history_count &&
         last_saved_sample_time == chart_time_history[last] &&
@@ -238,8 +261,6 @@ static void archive_current_pour(void)
     }
     time_t epoch = brew_epoch;
     if (!epoch && pourbot_time_valid()) {
-        int64_t elapsed = brew_elapsed_us;
-        if (brew_running) elapsed += esp_timer_get_time() - brew_started_us;
         epoch = time(NULL) - elapsed / 1000000;
     }
     bool queued = archive_ready && pour_archive_save(&brew_recipe, epoch, chart_history_count,
@@ -1198,14 +1219,13 @@ static void analytics_detail_render(void)
     lv_obj_set_style_text_color(axis_title, lv_color_hex(0xDCE5EA), 0);
     lv_obj_align(axis_title, LV_ALIGN_TOP_LEFT, 177, 211);
     lv_obj_t *stats = lv_label_create(analytics_body);
-    char final[20], peak[20], elapsed[16];
+    char final[20], average[20], elapsed[16];
     format_fixed(final, sizeof(final), analytics_result->samples[e->count - 1].weight_tenths / 10.0f, 1);
-    int32_t peak_flow = 0;
-    for (unsigned i = 0; i < e->count; ++i)
-        if (analytics_result->samples[i].flow_tenths > peak_flow) peak_flow = analytics_result->samples[i].flow_tenths;
-    format_fixed(peak, sizeof(peak), peak_flow / 10.0f, 1);
+    const float average_flow = duration > 0
+        ? analytics_result->samples[e->count - 1].weight_tenths / 10.0f / duration : 0.0f;
+    format_fixed(average, sizeof(average), average_flow, 1);
     format_chart_time(elapsed, sizeof(elapsed), duration);
-    lv_label_set_text_fmt(stats, "FINAL\n%s g\n\nPEAK FLOW\n%s g/s\n\nTIME\n%s", final, peak, elapsed);
+    lv_label_set_text_fmt(stats, "FINAL\n%s g\n\nAVG FLOW\n%s g/s\n\nTIME\n%s", final, average, elapsed);
     lv_obj_set_style_text_font(stats, &lv_font_montserrat_12, 0);
     lv_obj_set_style_text_color(stats, lv_color_hex(0xF8FAFC), 0);
     lv_obj_align(stats, LV_ALIGN_TOP_LEFT, 385, 48);
