@@ -1,6 +1,7 @@
 """Package the matching bootloader, partitions and application for web installation."""
 import json
 import pathlib
+import shutil
 import subprocess
 import sys
 
@@ -9,6 +10,8 @@ build = root / '.pio/build/LVGL-320-480'
 version = sys.argv[1].removeprefix('v')
 destination = root / 'site/firmware'
 destination.mkdir(parents=True, exist_ok=True)
+# The application-only image is also the stable, redirect-free OTA endpoint.
+shutil.copy2(build / 'firmware.bin', destination / 'firmware.bin')
 # PlatformIO's flash arguments supply exact offsets and board flash settings.
 args = json.loads((build / 'flasher_args.json').read_text())
 esptool = pathlib.Path.home() / '.platformio/packages/tool-esptoolpy/esptool.py'

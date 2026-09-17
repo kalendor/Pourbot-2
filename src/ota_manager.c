@@ -14,7 +14,7 @@
 #include "freertos/task.h"
 #include "wifi_manager.h"
 
-#define OTA_URL "https://github.com/kalendor/Pourbot-2/releases/latest/download/firmware.bin"
+#define OTA_URL "https://kalendor.github.io/Pourbot-2/firmware/firmware.bin"
 
 static SemaphoreHandle_t ota_mutex;
 static pourbot_ota_status_t ota_status;
@@ -61,18 +61,31 @@ static void ota_task(void *argument)
     const esp_http_client_config_t http = {
         .url = OTA_URL,
         .crt_bundle_attach = esp_crt_bundle_attach,
-        .timeout_ms = 15000,
+        .timeout_ms = 30000,
         .keep_alive_enable = true,
+        .user_agent = "PourBot-OTA/1",
+        .max_redirection_count = 4,
         .buffer_size = 4096,
         .buffer_size_tx = 1024,
     };
     const esp_https_ota_config_t config = { .http_config = &http };
     esp_https_ota_handle_t handle = NULL;
     status_set(true, false, false, 0, "Connecting to GitHub...");
-    esp_err_t err = esp_https_ota_begin(&config, &handle);
+    esp_err_t err = ESP_FAIL;
+    for (unsigned attempt = 0; attempt < 3; ++attempt) {
+        err = esp_https_ota_begin(&config, &handle);
+        if (err == ESP_OK) break;
+        if (handle) {
+            esp_https_ota_abort(handle);
+            handle = NULL;
+        }
+        if (attempt < 2) vTaskDelay(pdMS_TO_TICKS(1000));
+    }
     if (err != ESP_OK) {
-        status_set(false, true, false, 0,
-                   "Update unavailable - publish firmware.bin in the latest GitHub release");
+        char message[128];
+        snprintf(message, sizeof(message), "Update connection failed: %s (0x%x)",
+                 esp_err_to_name(err), (unsigned)err);
+        status_set(false, true, false, 0, message);
         vTaskDelete(NULL);
     }
 
