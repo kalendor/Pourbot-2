@@ -62,12 +62,26 @@ static lv_obj_t *graph_weight_label;
 static lv_obj_t *graph_flow_label;
 static lv_obj_t *graph_timer_label;
 static lv_obj_t *graph_brew_button_label;
-static lv_obj_t *recipes_screen;
+static lv_obj_t *dashboard_screen;
+static lv_obj_t *dashboard_recipe_label;
+static lv_obj_t *dashboard_recipe_detail_label;
+static lv_obj_t *dashboard_weight_label;
+static lv_obj_t *dashboard_flow_label;
+static lv_obj_t *dashboard_timer_label;
+static lv_obj_t *dashboard_target_label;
+static lv_obj_t *dashboard_current_label;
+static lv_obj_t *dashboard_remaining_label;
+static lv_obj_t *dashboard_average_label;
+static lv_obj_t *dashboard_chart;
+static lv_chart_series_t *dashboard_weight_series;
+static lv_chart_series_t *dashboard_flow_series;
+static lv_obj_t *dashboard_time_labels[4];
+static lv_obj_t *dashboard_weight_labels[5];
+static lv_obj_t *dashboard_brew_button_label;
 static lv_obj_t *main_dose_card;
 static lv_obj_t *main_target_card;
 static lv_obj_t *main_weight_group;
 static lv_obj_t *main_brew_button;
-static void refresh_recipes_screen(void);
 static lv_obj_t *recipe_edit_values[4];
 static lv_obj_t *menu_overlay;
 static lv_obj_t *calibration_status_label;
@@ -191,6 +205,7 @@ static void set_brew_labels(const char *text)
 {
     if (brew_button_label) lv_label_set_text(brew_button_label, text);
     if (graph_brew_button_label) lv_label_set_text(graph_brew_button_label, text);
+    if (dashboard_brew_button_label) lv_label_set_text(dashboard_brew_button_label, text);
 }
 
 #define CHART_HISTORY_MAX 1200
@@ -417,22 +432,36 @@ static void chart_session_reset(void)
         lv_chart_set_all_value(weight_chart, flow_chart_series, LV_CHART_POINT_NONE);
         lv_chart_refresh(weight_chart);
     }
+    if (dashboard_chart && dashboard_weight_series && dashboard_flow_series) {
+        lv_chart_set_range(dashboard_chart, LV_CHART_AXIS_PRIMARY_Y, 0, chart_weight_max);
+        lv_chart_set_range(dashboard_chart, LV_CHART_AXIS_SECONDARY_Y, 0, chart_flow_max);
+        lv_chart_set_all_value(dashboard_chart, dashboard_weight_series, LV_CHART_POINT_NONE);
+        lv_chart_set_all_value(dashboard_chart, dashboard_flow_series, LV_CHART_POINT_NONE);
+        lv_chart_refresh(dashboard_chart);
+    }
     for (int i = 0; i < 4; ++i) {
         if (chart_time_labels[i]) lv_label_set_text(chart_time_labels[i], "0:00");
     }
     for (int i = 0; i < 5; ++i) {
         if (chart_weight_labels[i]) lv_label_set_text_fmt(chart_weight_labels[i], "%ld",
             (long)(chart_weight_max * (4 - i) / 4));
+        if (dashboard_weight_labels[i]) lv_label_set_text_fmt(dashboard_weight_labels[i], "%ld",
+            (long)(chart_weight_max * (4 - i) / 4));
+    }
+    for (int i = 0; i < 4; ++i) {
+        if (dashboard_time_labels[i]) lv_label_set_text(dashboard_time_labels[i], "0:00");
     }
 }
 
-static void chart_render(uint32_t elapsed_seconds)
+static void chart_render_one(lv_obj_t *chart, lv_chart_series_t *weight_series,
+                             lv_chart_series_t *flow_series, lv_obj_t **time_labels,
+                             lv_obj_t **weight_labels, uint32_t elapsed_seconds)
 {
-    if (!weight_chart || chart_history_count == 0) return;
-    lv_chart_set_range(weight_chart, LV_CHART_AXIS_PRIMARY_Y, 0, chart_weight_max);
-    lv_chart_set_range(weight_chart, LV_CHART_AXIS_SECONDARY_Y, 0, chart_flow_max);
+    if (!chart || !weight_series || !flow_series || chart_history_count == 0) return;
+    lv_chart_set_range(chart, LV_CHART_AXIS_PRIMARY_Y, 0, chart_weight_max);
+    lv_chart_set_range(chart, LV_CHART_AXIS_SECONDARY_Y, 0, chart_flow_max);
     for (int i = 0; i < 5; ++i) {
-        if (chart_weight_labels[i]) lv_label_set_text_fmt(chart_weight_labels[i], "%ld",
+        if (weight_labels[i]) lv_label_set_text_fmt(weight_labels[i], "%ld",
             (long)(chart_weight_max * (4 - i) / 4));
     }
     uint16_t history_index = 0;
@@ -440,18 +469,26 @@ static void chart_render(uint32_t elapsed_seconds)
         const uint32_t point_time = (uint32_t)((uint64_t)elapsed_seconds * point / 59);
         while (history_index + 1 < chart_history_count &&
                chart_time_history[history_index + 1] <= point_time) history_index++;
-        lv_chart_set_value_by_id(weight_chart, weight_chart_series, point,
+        lv_chart_set_value_by_id(chart, weight_series, point,
                                  chart_weight_history[history_index]);
-        lv_chart_set_value_by_id(weight_chart, flow_chart_series, point,
+        lv_chart_set_value_by_id(chart, flow_series, point,
                                  chart_flow_history[history_index]);
     }
     char time_text[12];
     for (int i = 0; i < 4; ++i) {
         format_chart_time(time_text, sizeof(time_text),
                           (uint32_t)(((uint64_t)elapsed_seconds * i) / 3));
-        lv_label_set_text(chart_time_labels[i], time_text);
+        if (time_labels[i]) lv_label_set_text(time_labels[i], time_text);
     }
-    lv_chart_refresh(weight_chart);
+    lv_chart_refresh(chart);
+}
+
+static void chart_render(uint32_t elapsed_seconds)
+{
+    chart_render_one(weight_chart, weight_chart_series, flow_chart_series,
+                     chart_time_labels, chart_weight_labels, elapsed_seconds);
+    chart_render_one(dashboard_chart, dashboard_weight_series, dashboard_flow_series,
+                     dashboard_time_labels, dashboard_weight_labels, elapsed_seconds);
 }
 
 static void set_main_brew_metrics_visible(bool visible)
@@ -512,6 +549,12 @@ static void brew_timer_display_cb(lv_timer_t *timer)
                           (unsigned long)((elapsed_ms / 100) % 10));
     if (graph_timer_label) {
         lv_label_set_text_fmt(graph_timer_label, "%02lu:%02lu.%lu",
+                              (unsigned long)(elapsed_ms / 60000),
+                              (unsigned long)((elapsed_ms / 1000) % 60),
+                              (unsigned long)((elapsed_ms / 100) % 10));
+    }
+    if (dashboard_timer_label) {
+        lv_label_set_text_fmt(dashboard_timer_label, "%02lu:%02lu.%lu",
                               (unsigned long)(elapsed_ms / 60000),
                               (unsigned long)((elapsed_ms / 1000) % 60),
                               (unsigned long)((elapsed_ms / 100) % 10));
@@ -1376,6 +1419,7 @@ static void recipe_save_event_cb(lv_event_t *event)
     pourbot_recipe_save_and_select(recipe_edit_index, &recipe_edit);
     lv_label_set_text(recipe_title_label, recipe_edit.name);
     if (graph_recipe_label) lv_label_set_text(graph_recipe_label, recipe_edit.name);
+    if (dashboard_recipe_label) lv_label_set_text(dashboard_recipe_label, recipe_edit.name);
     if (recipe_dose_value_label) {
         lv_label_set_text_fmt(recipe_dose_value_label, "%u.0 g", recipe_edit.dose_g);
     }
@@ -1388,7 +1432,6 @@ static void recipe_save_event_cb(lv_event_t *event)
      * and reveal the tile that was active when the menu was opened. */
     close_overlay();
     memset(recipe_edit_values, 0, sizeof(recipe_edit_values));
-    if (recipes_screen) refresh_recipes_screen();
 }
 
 static void recipe_editor_event_cb(lv_event_t *event)
@@ -1464,10 +1507,6 @@ static void recipes_event_cb(lv_event_t *event)
     (void)event;
     close_overlay();
     memset(recipe_edit_values, 0, sizeof(recipe_edit_values));
-    if (recipes_screen && lv_tileview_get_tile_act(page_tileview) == recipes_screen) {
-        refresh_recipes_screen();
-        return;
-    }
     menu_overlay = lv_obj_create(lv_layer_top());
     lv_obj_set_size(menu_overlay, 480, 320);
     lv_obj_set_style_bg_color(menu_overlay, lv_color_hex(0x020305), 0);
@@ -1987,62 +2026,170 @@ static void create_graph_screen(void)
     lv_obj_center(graph_brew_button_label);
 }
 
-static void refresh_recipes_screen(void)
+static lv_obj_t *dashboard_stat_label(lv_obj_t *parent, const char *heading,
+                                      lv_coord_t x, lv_coord_t width)
 {
-    lv_obj_clean(recipes_screen);
-    battery_labels[2] = NULL;
-    lv_obj_t *menu = lv_btn_create(recipes_screen);
-    lv_obj_set_size(menu, 138, 34);
+    lv_obj_t *card = make_panel(parent, width, 57, 0x091117);
+    lv_obj_align(card, LV_ALIGN_TOP_LEFT, x, 43);
+    lv_obj_set_style_border_width(card, 1, 0);
+    lv_obj_set_style_border_color(card, lv_color_hex(0x203641), 0);
+    lv_obj_t *title = lv_label_create(card);
+    lv_label_set_text(title, heading);
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_10, 0);
+    lv_obj_set_style_text_color(title, lv_color_hex(0x9EB0BA), 0);
+    lv_obj_align(title, LV_ALIGN_TOP_LEFT, 8, 4);
+    lv_obj_t *value = lv_label_create(card);
+    lv_obj_set_width(value, width - 16);
+    lv_obj_set_style_text_align(value, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_font(value, &lv_font_montserrat_24, 0);
+    lv_obj_set_style_text_color(value, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_align(value, LV_ALIGN_BOTTOM_MID, 0, -4);
+    return value;
+}
+
+static void create_dashboard_screen(void)
+{
+    dashboard_screen = lv_tileview_add_tile(page_tileview, 3, 0, LV_DIR_LEFT);
+    lv_obj_set_style_bg_color(dashboard_screen, lv_color_hex(0x030608), 0);
+    lv_obj_set_style_bg_opa(dashboard_screen, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(dashboard_screen, 2, 0);
+    lv_obj_set_style_border_color(dashboard_screen, lv_color_hex(0x314753), 0);
+    lv_obj_set_style_radius(dashboard_screen, 16, 0);
+    lv_obj_clear_flag(dashboard_screen, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *menu = lv_btn_create(dashboard_screen);
+    lv_obj_set_size(menu, 42, 34);
     lv_obj_align(menu, LV_ALIGN_TOP_LEFT, 5, 2);
     lv_obj_set_style_bg_opa(menu, LV_OPA_TRANSP, 0);
     lv_obj_set_style_shadow_width(menu, 0, 0);
     lv_obj_add_event_cb(menu, menu_event_cb, LV_EVENT_CLICKED, NULL);
-    lv_obj_t *brand = lv_label_create(menu);
-    lv_label_set_recolor(brand, true);
-    lv_label_set_text(brand, LV_SYMBOL_LIST "  Pour#F2B94F Bot#");
-    lv_obj_set_style_text_font(brand, &lv_font_montserrat_16, 0);
-    lv_obj_set_style_text_color(brand, lv_color_hex(0xE8EEF2), 0);
-    lv_obj_center(brand);
-    lv_obj_t *title = lv_label_create(recipes_screen);
-    lv_label_set_text(title, "RECIPES");
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_18, 0);
-    lv_obj_set_style_text_color(title, lv_color_hex(0xF8FAFC), 0);
-    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 6);
-    add_page_dots(recipes_screen, 2);
-    add_battery_label(recipes_screen, 2);
-    for (uint8_t i = 0; i < POURBOT_RECIPE_COUNT; ++i) {
-        const pourbot_recipe_t *recipe = pourbot_recipe_get(i);
-        const bool active = i == pourbot_recipe_active_index();
-        lv_obj_t *row = lv_btn_create(recipes_screen);
-        lv_obj_set_size(row, 448, 53);
-        lv_obj_align(row, LV_ALIGN_TOP_LEFT, 16, 57 + i * 60);
-        lv_obj_set_style_radius(row, 14, 0);
-        lv_obj_set_style_bg_color(row, lv_color_hex(active ? 0x2B2317 : 0x0B1017), 0);
-        lv_obj_set_style_border_width(row, 1, 0);
-        lv_obj_set_style_border_color(row, lv_color_hex(active ? 0xB7791F : 0x1F2937), 0);
-        lv_obj_add_event_cb(row, recipe_editor_event_cb, LV_EVENT_CLICKED, (void *)(uintptr_t)i);
-        lv_obj_t *name = lv_label_create(row);
-        lv_label_set_text(name, recipe->name);
-        lv_obj_set_style_text_font(name, &lv_font_montserrat_14, 0);
-        lv_obj_set_style_text_color(name, lv_color_hex(0xFFFFFF), 0);
-        lv_obj_align(name, LV_ALIGN_TOP_LEFT, 4, -2);
-        lv_obj_t *detail = lv_label_create(row);
-        lv_label_set_text_fmt(detail, "%ug  1:%u.%u  %ug target  Bloom %us  Hold %us",
-            recipe->dose_g, recipe->ratio_x10 / 10, recipe->ratio_x10 % 10,
-            pourbot_recipe_target_g(recipe), recipe->bloom_hold_s, recipe->pour_hold_s);
-        lv_obj_set_style_text_font(detail, &lv_font_montserrat_10, 0);
-        lv_obj_set_style_text_color(detail, lv_color_hex(0xFFFFFF), 0);
-        lv_obj_align(detail, LV_ALIGN_BOTTOM_LEFT, 4, 2);
-    }
-}
+    lv_obj_t *menu_icon = lv_label_create(menu);
+    lv_label_set_text(menu_icon, LV_SYMBOL_LIST);
+    lv_obj_set_style_text_font(menu_icon, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_color(menu_icon, lv_color_hex(0xC8D4DA), 0);
+    lv_obj_center(menu_icon);
 
-static void create_recipes_screen(void)
-{
-    recipes_screen = lv_tileview_add_tile(page_tileview, 3, 0, LV_DIR_LEFT);
-    lv_obj_set_style_bg_color(recipes_screen, lv_color_hex(0x030608), 0);
-    lv_obj_set_style_bg_opa(recipes_screen, LV_OPA_COVER, 0);
-    lv_obj_clear_flag(recipes_screen, LV_OBJ_FLAG_SCROLLABLE);
-    refresh_recipes_screen();
+    dashboard_recipe_label = lv_label_create(dashboard_screen);
+    lv_label_set_text(dashboard_recipe_label, pourbot_recipe_active()->name);
+    lv_obj_set_width(dashboard_recipe_label, 175);
+    lv_obj_set_style_text_font(dashboard_recipe_label, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_color(dashboard_recipe_label, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_align(dashboard_recipe_label, LV_ALIGN_TOP_LEFT, 52, 7);
+    dashboard_recipe_detail_label = lv_label_create(dashboard_screen);
+    lv_obj_set_width(dashboard_recipe_detail_label, 225);
+    lv_obj_set_style_text_align(dashboard_recipe_detail_label, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_set_style_text_font(dashboard_recipe_detail_label, &lv_font_montserrat_10, 0);
+    lv_obj_set_style_text_color(dashboard_recipe_detail_label, lv_color_hex(0xD5E0E5), 0);
+    lv_obj_align(dashboard_recipe_detail_label, LV_ALIGN_TOP_RIGHT, -65, 9);
+    add_page_dots(dashboard_screen, 2);
+    add_battery_label(dashboard_screen, 2);
+
+    dashboard_weight_label = dashboard_stat_label(dashboard_screen, "WEIGHT", 12, 145);
+    dashboard_flow_label = dashboard_stat_label(dashboard_screen, "FLOW", 164, 145);
+    dashboard_timer_label = dashboard_stat_label(dashboard_screen, "ELAPSED TIME", 316, 152);
+    lv_label_set_text(dashboard_weight_label, "0.0 g");
+    lv_label_set_text(dashboard_flow_label, "0.0 g/s");
+    lv_label_set_text(dashboard_timer_label, "00:00.0");
+
+    lv_obj_t *chart_card = make_panel(dashboard_screen, 294, 139, 0x05090C);
+    lv_obj_align(chart_card, LV_ALIGN_TOP_LEFT, 12, 107);
+    lv_obj_set_style_border_width(chart_card, 1, 0);
+    lv_obj_set_style_border_color(chart_card, lv_color_hex(0x203641), 0);
+    lv_obj_t *legend = lv_label_create(chart_card);
+    lv_label_set_recolor(legend, true);
+    lv_label_set_text(legend, "#F2B94F ● Weight#   #22AEEF ● Flow#");
+    lv_obj_set_style_text_font(legend, &lv_font_montserrat_10, 0);
+    lv_obj_align(legend, LV_ALIGN_TOP_LEFT, 36, 2);
+    const lv_coord_t y_pos[] = {18, 38, 58, 78, 98};
+    for (uint8_t i = 0; i < 5; ++i) {
+        dashboard_weight_labels[i] = lv_label_create(chart_card);
+        lv_obj_set_width(dashboard_weight_labels[i], 29);
+        lv_obj_set_style_text_align(dashboard_weight_labels[i], LV_TEXT_ALIGN_RIGHT, 0);
+        lv_obj_set_style_text_font(dashboard_weight_labels[i], &lv_font_montserrat_10, 0);
+        lv_obj_set_style_text_color(dashboard_weight_labels[i], lv_color_hex(0x91A1AA), 0);
+        lv_obj_align(dashboard_weight_labels[i], LV_ALIGN_TOP_LEFT, 0, y_pos[i]);
+    }
+    dashboard_chart = lv_chart_create(chart_card);
+    lv_obj_set_size(dashboard_chart, 244, 90);
+    lv_obj_align(dashboard_chart, LV_ALIGN_TOP_LEFT, 35, 22);
+    lv_chart_set_type(dashboard_chart, LV_CHART_TYPE_LINE);
+    lv_chart_set_point_count(dashboard_chart, 60);
+    lv_chart_set_div_line_count(dashboard_chart, 5, 7);
+    lv_obj_set_style_bg_color(dashboard_chart, lv_color_hex(0x04080B), 0);
+    lv_obj_set_style_border_width(dashboard_chart, 0, 0);
+    lv_obj_set_style_line_color(dashboard_chart, lv_color_hex(0x17252E), LV_PART_MAIN);
+    lv_obj_set_style_size(dashboard_chart, 0, LV_PART_INDICATOR);
+    dashboard_weight_series = lv_chart_add_series(dashboard_chart, lv_color_hex(0xF2B94F),
+                                                    LV_CHART_AXIS_PRIMARY_Y);
+    dashboard_flow_series = lv_chart_add_series(dashboard_chart, lv_color_hex(0x22AEEF),
+                                                 LV_CHART_AXIS_SECONDARY_Y);
+    const lv_coord_t x_pos[] = {34, 107, 180, 251};
+    for (uint8_t i = 0; i < 4; ++i) {
+        dashboard_time_labels[i] = lv_label_create(chart_card);
+        lv_label_set_text(dashboard_time_labels[i], "0:00");
+        lv_obj_set_style_text_font(dashboard_time_labels[i], &lv_font_montserrat_10, 0);
+        lv_obj_set_style_text_color(dashboard_time_labels[i], lv_color_hex(0x91A1AA), 0);
+        lv_obj_align(dashboard_time_labels[i], LV_ALIGN_TOP_LEFT, x_pos[i], 115);
+    }
+
+    lv_obj_t *summary = make_panel(dashboard_screen, 156, 139, 0x091117);
+    lv_obj_align(summary, LV_ALIGN_TOP_RIGHT, -12, 107);
+    lv_obj_set_style_border_width(summary, 1, 0);
+    lv_obj_set_style_border_color(summary, lv_color_hex(0x203641), 0);
+    const char *summary_names[] = {"TARGET", "CURRENT", "REMAINING", "AVG FLOW"};
+    lv_obj_t **summary_values[] = {&dashboard_target_label, &dashboard_current_label,
+                                   &dashboard_remaining_label, &dashboard_average_label};
+    for (uint8_t i = 0; i < 4; ++i) {
+        lv_obj_t *name = lv_label_create(summary);
+        lv_label_set_text(name, summary_names[i]);
+        lv_obj_set_style_text_font(name, &lv_font_montserrat_10, 0);
+        lv_obj_set_style_text_color(name, lv_color_hex(0x9EB0BA), 0);
+        lv_obj_align(name, LV_ALIGN_TOP_LEFT, 8, 9 + i * 31);
+        *summary_values[i] = lv_label_create(summary);
+        lv_obj_set_width(*summary_values[i], 76);
+        lv_obj_set_style_text_align(*summary_values[i], LV_TEXT_ALIGN_RIGHT, 0);
+        lv_obj_set_style_text_font(*summary_values[i], &lv_font_montserrat_12, 0);
+        lv_obj_set_style_text_color(*summary_values[i], lv_color_hex(0xFFFFFF), 0);
+        lv_obj_align(*summary_values[i], LV_ALIGN_TOP_RIGHT, -8, 8 + i * 31);
+    }
+
+    lv_obj_t *tare = lv_btn_create(dashboard_screen);
+    lv_obj_set_size(tare, 92, 52);
+    lv_obj_align(tare, LV_ALIGN_BOTTOM_LEFT, 12, -9);
+    lv_obj_set_style_radius(tare, 12, 0);
+    lv_obj_set_style_bg_color(tare, lv_color_hex(0x34414A), 0);
+    lv_obj_set_style_shadow_width(tare, 0, 0);
+    lv_obj_add_event_cb(tare, tare_event_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *tare_text = lv_label_create(tare);
+    lv_label_set_text(tare_text, "TARE");
+    lv_obj_set_style_text_font(tare_text, &lv_font_montserrat_14, 0);
+    lv_obj_center(tare_text);
+    lv_obj_t *menu_btn = lv_btn_create(dashboard_screen);
+    lv_obj_set_size(menu_btn, 130, 52);
+    lv_obj_align(menu_btn, LV_ALIGN_BOTTOM_LEFT, 112, -9);
+    lv_obj_set_style_radius(menu_btn, 12, 0);
+    lv_obj_set_style_bg_color(menu_btn, lv_color_hex(0x34414A), 0);
+    lv_obj_set_style_shadow_width(menu_btn, 0, 0);
+    lv_obj_add_event_cb(menu_btn, menu_event_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *menu_text = lv_label_create(menu_btn);
+    lv_label_set_text(menu_text, LV_SYMBOL_LIST "  MENU");
+    lv_obj_set_style_text_font(menu_text, &lv_font_montserrat_14, 0);
+    lv_obj_center(menu_text);
+    lv_obj_t *brew = lv_btn_create(dashboard_screen);
+    lv_obj_set_size(brew, 218, 52);
+    lv_obj_align(brew, LV_ALIGN_BOTTOM_RIGHT, -12, -9);
+    lv_obj_set_style_radius(brew, 12, 0);
+    lv_obj_set_style_bg_color(brew, lv_color_hex(0xF2B94F), 0);
+    lv_obj_set_style_bg_color(brew, lv_color_hex(0xD99A31), LV_STATE_PRESSED);
+    lv_obj_set_style_shadow_width(brew, 0, 0);
+    lv_obj_add_event_cb(brew, brew_event_cb, LV_EVENT_SHORT_CLICKED, NULL);
+    lv_obj_add_event_cb(brew, brew_event_cb, LV_EVENT_LONG_PRESSED, NULL);
+    dashboard_brew_button_label = lv_label_create(brew);
+    lv_label_set_text(dashboard_brew_button_label, LV_SYMBOL_PLAY "  START");
+    lv_obj_set_style_text_font(dashboard_brew_button_label, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_color(dashboard_brew_button_label, lv_color_hex(0x111619), 0);
+    lv_obj_center(dashboard_brew_button_label);
+    chart_session_reset();
 }
 
 static void update_ui(bool connected, int32_t relative)
@@ -2063,6 +2210,13 @@ static void update_ui(bool connected, int32_t relative)
         const uint16_t target_g = pourbot_recipe_target_g(recipe);
         lv_label_set_text(recipe_title_label, recipe->name);
         if (graph_recipe_label) lv_label_set_text(graph_recipe_label, recipe->name);
+        if (dashboard_recipe_label) lv_label_set_text(dashboard_recipe_label, recipe->name);
+        if (dashboard_recipe_detail_label) {
+            lv_label_set_text_fmt(dashboard_recipe_detail_label, "DOSE %u g   1:%u.%u   TARGET %u g",
+                                  recipe->dose_g, recipe->ratio_x10 / 10,
+                                  recipe->ratio_x10 % 10, target_g);
+        }
+        if (dashboard_target_label) lv_label_set_text_fmt(dashboard_target_label, "%u g", target_g);
         if (recipe_dose_value_label) {
             lv_label_set_text_fmt(recipe_dose_value_label, "%u.0 g", recipe->dose_g);
         }
@@ -2114,12 +2268,15 @@ static void update_ui(bool connected, int32_t relative)
             if (graph_weight_label) {
                 lv_label_set_text_fmt(graph_weight_label, "%s g", weight_text);
             }
+            if (dashboard_weight_label) lv_label_set_text_fmt(dashboard_weight_label, "%s g", weight_text);
+            if (dashboard_current_label) lv_label_set_text_fmt(dashboard_current_label, "%s g", weight_text);
         } else {
             lv_label_set_text_fmt(weight_label, "%" PRId32, relative);
             lv_label_set_text(weight_unit_label, "ct");
             if (graph_weight_label) {
                 lv_label_set_text_fmt(graph_weight_label, "%" PRId32 " ct", relative);
             }
+            if (dashboard_weight_label) lv_label_set_text_fmt(dashboard_weight_label, "%" PRId32 " ct", relative);
         }
         lv_label_set_text(status_label, "");
         const float grams_flow = scale_flow_gps;
@@ -2134,6 +2291,21 @@ static void update_ui(bool connected, int32_t relative)
             lv_label_set_text_fmt(flow_label, "FLOW  %s g/s", flow_text);
             if (graph_flow_label) {
                 lv_label_set_text_fmt(graph_flow_label, "%s g/s", flow_text);
+            }
+            if (dashboard_flow_label) lv_label_set_text_fmt(dashboard_flow_label, "%s g/s", flow_text);
+            if (dashboard_remaining_label) {
+                float remaining = target_g - shown_grams;
+                if (remaining < 0.0f) remaining = 0.0f;
+                char remaining_text[20];
+                format_fixed(remaining_text, sizeof(remaining_text), remaining, 1);
+                lv_label_set_text_fmt(dashboard_remaining_label, "%s g", remaining_text);
+            }
+            if (dashboard_average_label) {
+                const float average_flow = elapsed > 0 && shown_grams > 0.0f
+                    ? shown_grams / ((float)elapsed / 1000000.0f) : 0.0f;
+                char average_text[20];
+                format_fixed(average_text, sizeof(average_text), average_flow, 1);
+                lv_label_set_text_fmt(dashboard_average_label, "%s g/s", average_text);
             }
             lv_arc_set_range(progress_panel, 0, target_g);
             lv_arc_set_value(progress_panel, (int)(shown_grams < 0 ? 0 :
@@ -2187,6 +2359,7 @@ static void update_ui(bool connected, int32_t relative)
         } else {
             lv_label_set_text(flow_label, "FLOW  0 ct/s");
             if (graph_flow_label) lv_label_set_text(graph_flow_label, "0 ct/s");
+            if (dashboard_flow_label) lv_label_set_text(dashboard_flow_label, "0 ct/s");
             lv_arc_set_value(flow_bar, 0);
         }
         if (!tare_requested) {
@@ -2197,6 +2370,8 @@ static void update_ui(bool connected, int32_t relative)
         lv_label_set_text(status_label, "NO SCALE");
         if (graph_weight_label) lv_label_set_text(graph_weight_label, "-- g");
         if (graph_flow_label) lv_label_set_text(graph_flow_label, "0.0 g/s");
+        if (dashboard_weight_label) lv_label_set_text(dashboard_weight_label, "-- g");
+        if (dashboard_flow_label) lv_label_set_text(dashboard_flow_label, "0.0 g/s");
     }
     bsp_display_unlock();
 }
@@ -2496,7 +2671,7 @@ void app_main(void)
         lv_obj_clean(lv_scr_act());
         create_ui();
         create_graph_screen();
-        create_recipes_screen();
+        create_dashboard_screen();
         /* Apply the clean scale layout on boot, even though brewing starts
          * inactive and the visibility flag is initially false. */
         main_brew_metrics_visible = true;
