@@ -8,6 +8,10 @@ Visit [PourBot](https://kalendor.github.io/Pourbot-2/) for features and the late
 
 ## BOM
 **JC3248W535C ESP32-S3 CBD (Cheap Black Display)**
+**HX711 Load Cell Amplifier**
+**3-5KG load Cell**
+**1000mah Lipo battery**
+**Optional MAX17048 for battery level**
 
 ## Wiring
 
