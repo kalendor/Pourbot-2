@@ -1,6 +1,6 @@
 # Pour history and network time
 
-Analytics is available from the menu. It lists the newest 25 PourBot CSV files on the SD card. Selecting a file opens a separate, read-only amber-weight/blue-flow graph with dynamic axes and final weight, peak flow, and recorded duration. It does not replace or reset the live graph.
+Analytics is available from the menu. It lists the newest 25 PourBot CSV files on the SD card. Selecting a file opens a separate, read-only amber-weight/blue-flow graph with dynamic axes, final weight, average flow, and recorded duration. Final weight is the highest weight reached during the recorded pour, so removing the brewer before reset does not make the report read zero. It does not replace or reset the live graph.
 
 Hold START to reset a brew, enter standby, or tap SAVE CURRENT in Analytics to queue a snapshot of the recorded chart. Pause/resume alone does not save a file. Unchanged snapshots are not queued twice. A changed snapshot saved again is a separate file. A pour must have detected flow and at least one chart sample to be saved. The chart starts when flow is first detected, so its recorded duration excludes the initial wait before pouring. Chart history is bounded at 1,200 samples and progressively coarsened on very long sessions.
 

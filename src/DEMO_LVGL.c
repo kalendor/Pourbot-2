@@ -1162,9 +1162,12 @@ static void analytics_detail_render(void)
     lv_obj_set_style_text_font(legend, &lv_font_montserrat_12, 0);
     lv_obj_align(legend, LV_ALIGN_TOP_LEFT, 45, 23);
     int32_t max_weight = 500, max_flow = 100;
+    int32_t final_weight_tenths = 0;
     for (unsigned i = 0; i < e->count; ++i) {
         int32_t w = analytics_result->samples[i].weight_tenths / 10;
         int32_t f = analytics_result->samples[i].flow_tenths;
+        if (analytics_result->samples[i].weight_tenths > final_weight_tenths)
+            final_weight_tenths = analytics_result->samples[i].weight_tenths;
         if (w >= max_weight) max_weight = ((w + 99) / 100 + 1) * 100;
         if (f >= max_flow) max_flow = ((f + 49) / 50 + 1) * 50;
     }
@@ -1220,9 +1223,12 @@ static void analytics_detail_render(void)
     lv_obj_align(axis_title, LV_ALIGN_TOP_LEFT, 177, 211);
     lv_obj_t *stats = lv_label_create(analytics_body);
     char final[20], average[20], elapsed[16];
-    format_fixed(final, sizeof(final), analytics_result->samples[e->count - 1].weight_tenths / 10.0f, 1);
+    /* The brewer may remove the dripper before ending/resetting the session.
+     * Treat the greatest weight reached as the completed pour weight instead
+     * of using the last sample, which can legitimately be back at zero. */
+    format_fixed(final, sizeof(final), final_weight_tenths / 10.0f, 1);
     const float average_flow = duration > 0
-        ? analytics_result->samples[e->count - 1].weight_tenths / 10.0f / duration : 0.0f;
+        ? final_weight_tenths / 10.0f / duration : 0.0f;
     format_fixed(average, sizeof(average), average_flow, 1);
     format_chart_time(elapsed, sizeof(elapsed), duration);
     lv_label_set_text_fmt(stats, "FINAL\n%s g\n\nAVG FLOW\n%s g/s\n\nTIME\n%s", final, average, elapsed);
