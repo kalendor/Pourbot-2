@@ -963,12 +963,12 @@ static void ota_event_cb(lv_event_t *event)
     lv_obj_set_style_text_color(ota_status_label, lv_color_hex(0xF8FAFC), 0);
     lv_obj_set_style_text_align(ota_status_label, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_align(ota_status_label, LV_ALIGN_TOP_LEFT, 18, 89);
-    ota_check_button = small_action_button(card, "CHECK FOR UPDATES", 18, 119, 402,
+    ota_check_button = small_action_button(card, "CHECK FOR UPDATES", 90, 119, 260,
                                            0x2563EB, ota_install_event_cb);
-    ota_install_button = small_action_button(card, "DOWNLOAD AND INSTALL UPDATE", 18, 178, 402,
+    ota_install_button = small_action_button(card, "INSTALL UPDATE", 90, 178, 260,
                                              0x2563EB, ota_install_event_cb);
-    lv_obj_set_height(ota_install_button, 50);
-    /* A 422 x 70 touch target, contained in the card and separated from Check. */
+    /* Keep the compact visual treatment easy to operate on the touchscreen. */
+    lv_obj_set_ext_click_area(ota_check_button, 10);
     lv_obj_set_ext_click_area(ota_install_button, 10);
     overlay_timer = lv_timer_create(ota_ui_timer_cb, 250, NULL);
     ota_ui_timer_cb(NULL);
@@ -1365,16 +1365,20 @@ static void analytics_event_cb(lv_event_t *event)
     menu_overlay = make_panel(lv_layer_top(), 480, 320, 0x020305);
     lv_obj_center(menu_overlay);
     lv_obj_t *title = lv_label_create(menu_overlay);
-    lv_label_set_text(title, "POURS");
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_18, 0);
+    lv_label_set_text(title, "LAST 25 BREWS");
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_color(title, lv_color_hex(0xF8FAFC), 0);
     lv_obj_align(title, LV_ALIGN_TOP_LEFT, 12, 16);
     small_action_button(menu_overlay, "BACK", 386, 7, 78, 0x1F2937, analytics_back_event_cb);
     analytics_status_label = lv_label_create(menu_overlay);
+    /* Retain the internal status target for asynchronous SD operations, but
+     * keep the archive screen visually focused on its stronger page title. */
+    lv_obj_add_flag(analytics_status_label, LV_OBJ_FLAG_HIDDEN);
     lv_obj_set_width(analytics_status_label, 456);
     lv_obj_set_style_text_font(analytics_status_label, &lv_font_montserrat_10, 0);
     lv_obj_align(analytics_status_label, LV_ALIGN_TOP_LEFT, 12, 54);
-    analytics_body = make_panel(menu_overlay, 464, 252, 0x05090C);
-    lv_obj_align(analytics_body, LV_ALIGN_TOP_LEFT, 8, 68);
+    analytics_body = make_panel(menu_overlay, 464, 264, 0x05090C);
+    lv_obj_align(analytics_body, LV_ALIGN_TOP_LEFT, 8, 56);
     if (!analytics_result) { lv_label_set_text(analytics_status_label, "Not enough memory for archive viewer"); return; }
     overlay_timer = lv_timer_create(analytics_ui_timer_cb, 100, NULL);
     analytics_refresh_event_cb(NULL);
