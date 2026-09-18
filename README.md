@@ -7,11 +7,11 @@ ESP-IDF firmware for the Guition JC3248W535C ESP32-S3 display and HX711 scale. L
 Visit [PourBot](https://kalendor.github.io/Pourbot-2/) for features and the latest firmware installer. Use desktop Chrome or Edge with a USB data cable. The full browser installation resets saved calibration, recipes and Wi-Fi settings; use on-device OTA for routine updates that preserve settings.
 
 ## BOM
-**JC3248W535C ESP32-S3 CBD (Cheap Black Display)**
-**HX711 Load Cell Amplifier**
-**3-5KG load Cell**
-**1000mah Lipo battery**
-**Optional MAX17048 for battery level**
+-**JC3248W535C ESP32-S3 CBD (Cheap Black Display)**
+-**HX711 Load Cell Amplifier**
+-**3-5KG load Cell**
+-**1000mah Lipo battery**
+-**Optional MAX17048 for battery level**
 
 ## Wiring
 
