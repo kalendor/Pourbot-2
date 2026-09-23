@@ -53,6 +53,9 @@ PourBot stores up to 25 brew files on the microSD card. Each saved brew includes
 
 ## Basic wiring
 
+[Open the illustrated wiring and assembly guide](https://kalendor.github.io/Pourbot-2/wiring.html).
+
+
 The display board and HX711 use a shared 3.3 V supply and ground.
 
 | Connection | PourBot pin |
