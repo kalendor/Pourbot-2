@@ -521,6 +521,15 @@ static uint16_t guidance_stage_target(const pourbot_recipe_t *recipe, uint8_t st
         (((uint32_t)(target - bloom) * stage + (count - 2) / 2) / (count - 1)));
 }
 
+static void set_pour_guidance_fill(int progress)
+{
+    if (!pour_guidance_fill) return;
+    if (progress < 0) progress = 0;
+    if (progress > 1000) progress = 1000;
+    lv_obj_set_height(pour_guidance_fill, (112 * progress + 999) / 1000);
+    lv_obj_align(pour_guidance_fill, LV_ALIGN_BOTTOM_MID, 0, 0);
+}
+
 static void reset_pour_guidance(void)
 {
     guidance_stage_index = 0;
@@ -528,7 +537,7 @@ static void reset_pour_guidance(void)
     guidance_done = false;
     guidance_hold_started_elapsed_us = 0;
     if (recipe_dose_value_label) lv_label_set_text(recipe_dose_value_label, "READY");
-    if (pour_guidance_fill) lv_bar_set_value(pour_guidance_fill, 0, LV_ANIM_OFF);
+    set_pour_guidance_fill(0);
 }
 
 static void update_pour_guidance(const pourbot_recipe_t *recipe, float grams,
@@ -543,7 +552,7 @@ static void update_pour_guidance(const pourbot_recipe_t *recipe, float grams,
         guidance_done = true;
         guidance_holding = false;
         lv_label_set_text(recipe_dose_value_label, "DONE");
-        lv_bar_set_value(pour_guidance_fill, 1000, LV_ANIM_ON);
+        set_pour_guidance_fill(1000);
         return;
     }
     if (guidance_done) guidance_done = false;
@@ -554,7 +563,7 @@ static void update_pour_guidance(const pourbot_recipe_t *recipe, float grams,
         if (elapsed_us - guidance_hold_started_elapsed_us <
             (int64_t)hold_s * 1000000LL) {
             lv_label_set_text(recipe_dose_value_label, "STOP");
-            lv_bar_set_value(pour_guidance_fill, 1000, LV_ANIM_ON);
+            set_pour_guidance_fill(1000);
             return;
         }
         guidance_holding = false;
@@ -569,7 +578,7 @@ static void update_pour_guidance(const pourbot_recipe_t *recipe, float grams,
             guidance_holding = true;
             guidance_hold_started_elapsed_us = elapsed_us;
             lv_label_set_text(recipe_dose_value_label, "STOP");
-            lv_bar_set_value(pour_guidance_fill, 1000, LV_ANIM_ON);
+            set_pour_guidance_fill(1000);
             return;
         }
         guidance_stage_index++;
@@ -589,7 +598,7 @@ static void update_pour_guidance(const pourbot_recipe_t *recipe, float grams,
                 (float)(current_target - current_start)) : 1000;
     if (progress < 0) progress = 0;
     if (progress > 1000) progress = 1000;
-    lv_bar_set_value(pour_guidance_fill, progress, LV_ANIM_ON);
+    set_pour_guidance_fill(progress);
 }
 
 static void chart_render_one(lv_obj_t *chart, lv_chart_series_t *weight_series,
@@ -1841,49 +1850,21 @@ static void create_ui(void)
     lv_obj_t *dose_card = make_panel(screen, 126, 112, 0x0B1217);
     main_dose_card = dose_card;
     lv_obj_align(dose_card, LV_ALIGN_TOP_LEFT, 14, 45);
-    lv_obj_set_style_border_width(dose_card, 1, 0);
-    lv_obj_set_style_border_color(dose_card, lv_color_hex(0x1B2A33), 0);
-    pour_guidance_fill = lv_bar_create(dose_card);
-    lv_obj_set_size(pour_guidance_fill, 126, 112);
-    lv_obj_center(pour_guidance_fill);
-    lv_bar_set_range(pour_guidance_fill, 0, 1000);
-    lv_bar_set_value(pour_guidance_fill, 0, LV_ANIM_OFF);
-    lv_obj_set_style_radius(pour_guidance_fill, 10, LV_PART_MAIN);
-    lv_obj_set_style_radius(pour_guidance_fill, 10, LV_PART_INDICATOR);
-    lv_obj_set_style_bg_opa(pour_guidance_fill, LV_OPA_TRANSP, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(pour_guidance_fill, lv_color_hex(0xF2B94F),
-                              LV_PART_INDICATOR);
-    lv_obj_set_style_bg_opa(pour_guidance_fill, LV_OPA_60, LV_PART_INDICATOR);
+    lv_obj_set_style_clip_corner(dose_card, true, 0);
+    pour_guidance_fill = lv_obj_create(dose_card);
+    lv_obj_remove_style_all(pour_guidance_fill);
+    lv_obj_set_size(pour_guidance_fill, 126, 0);
+    lv_obj_align(pour_guidance_fill, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_set_style_bg_color(pour_guidance_fill, lv_color_hex(0xF2B94F), 0);
+    lv_obj_set_style_bg_opa(pour_guidance_fill, LV_OPA_COVER, 0);
     lv_obj_clear_flag(pour_guidance_fill, LV_OBJ_FLAG_CLICKABLE);
-    /* Coffee bean icon: draw it locally so it does not depend on emoji/font support. */
-    lv_obj_t *dose_mark = lv_obj_create(dose_card);
-    lv_obj_remove_style_all(dose_mark);
-    lv_obj_set_size(dose_mark, 19, 24);
-    lv_obj_set_style_bg_opa(dose_mark, LV_OPA_COVER, 0);
-    lv_obj_set_style_bg_color(dose_mark, lv_color_hex(0xF2B94F), 0);
-    lv_obj_set_style_radius(dose_mark, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_transform_angle(dose_mark, 280, 0);
-    lv_obj_set_style_transform_pivot_x(dose_mark, 9, 0);
-    lv_obj_set_style_transform_pivot_y(dose_mark, 12, 0);
-    lv_obj_align(dose_mark, LV_ALIGN_LEFT_MID, 17, 0);
-
-    lv_obj_t *bean_seam = lv_obj_create(dose_mark);
-    lv_obj_remove_style_all(bean_seam);
-    lv_obj_set_size(bean_seam, 3, 19);
-    lv_obj_set_style_bg_opa(bean_seam, LV_OPA_COVER, 0);
-    lv_obj_set_style_bg_color(bean_seam, lv_color_hex(0x0B1217), 0);
-    lv_obj_set_style_radius(bean_seam, LV_RADIUS_CIRCLE, 0);
-    lv_obj_align(bean_seam, LV_ALIGN_CENTER, 0, 0);
-    lv_obj_t *dose_caption = lv_label_create(dose_card);
-    lv_label_set_text(dose_caption, "Pour Guidance");
-    lv_obj_set_style_text_font(dose_caption, &lv_font_montserrat_12, 0);
-    lv_obj_set_style_text_color(dose_caption, lv_color_hex(0x98A8B2), 0);
-    lv_obj_align(dose_caption, LV_ALIGN_TOP_LEFT, 42, 24);
     recipe_dose_value_label = lv_label_create(dose_card);
     lv_label_set_text(recipe_dose_value_label, "READY");
-    lv_obj_set_style_text_font(recipe_dose_value_label, &lv_font_montserrat_18, 0);
+    lv_obj_set_width(recipe_dose_value_label, 126);
+    lv_obj_set_style_text_align(recipe_dose_value_label, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_font(recipe_dose_value_label, &lv_font_montserrat_20, 0);
     lv_obj_set_style_text_color(recipe_dose_value_label, lv_color_hex(0xF5F7F8), 0);
-    lv_obj_align(recipe_dose_value_label, LV_ALIGN_TOP_LEFT, 42, 49);
+    lv_obj_center(recipe_dose_value_label);
 
     lv_obj_t *target_card = make_panel(screen, 126, 142, 0x0B1217);
     main_target_card = target_card;
