@@ -17,4 +17,5 @@ typedef struct {
 } battery_gauge_sample_t;
 
 esp_err_t battery_gauge_init(void);
+esp_err_t battery_gauge_reconnect(void);
 esp_err_t battery_gauge_read(battery_gauge_sample_t *sample);

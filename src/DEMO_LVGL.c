@@ -194,6 +194,7 @@ static void battery_task(void *argument)
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
     bool gauge_online = false;
+    unsigned consecutive_read_failures = 0;
     int64_t charge_window_started_us = 0;
     uint16_t charge_window_start_mv = 0;
     bool charge_rate_positive = true;
@@ -207,10 +208,22 @@ static void battery_task(void *argument)
             ESP_LOGW(TAG, "MAX17048 read failed at 0x36 on SDA GPIO7 / SCL GPIO15: %s (0x%x)",
                      esp_err_to_name(result), (unsigned)result);
             gauge_online = false;
+            consecutive_read_failures++;
+            if (consecutive_read_failures >= 3) {
+                esp_err_t reconnect_result = battery_gauge_reconnect();
+                ESP_LOGW(TAG, "MAX17048 live reconnect: %s (0x%x)",
+                         esp_err_to_name(reconnect_result),
+                         (unsigned)reconnect_result);
+                consecutive_read_failures = 0;
+                charge_window_started_us = 0;
+            }
         } else if (!gauge_online) {
             ESP_LOGI(TAG, "MAX17048 detected: %u%%, %u mV", sample.percent,
                      sample.millivolts);
             gauge_online = true;
+            consecutive_read_failures = 0;
+        } else {
+            consecutive_read_failures = 0;
         }
         const int64_t now_us = esp_timer_get_time();
         bool next_charging = battery_charging;

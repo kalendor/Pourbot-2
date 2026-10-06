@@ -48,6 +48,17 @@ esp_err_t battery_gauge_init(void)
     return ESP_OK;
 }
 
+esp_err_t battery_gauge_reconnect(void)
+{
+    if (gauge_bus_ready) {
+        esp_err_t result = i2c_driver_delete(GAUGE_BUS);
+        if (result != ESP_OK && result != ESP_ERR_INVALID_STATE) return result;
+        gauge_bus_ready = false;
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    return battery_gauge_init();
+}
+
 esp_err_t battery_gauge_read(battery_gauge_sample_t *sample)
 {
     if (!sample) return ESP_ERR_INVALID_ARG;
