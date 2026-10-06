@@ -27,17 +27,20 @@ jobs:
       - name: Publish firmware.bin
         env:
           GH_TOKEN: ${{ github.token }}
-        run: >-
-          gh release create "$GITHUB_REF_NAME"
-          .pio/build/LVGL-320-480/firmware.bin#firmware.bin
-          --title "PourBot $GITHUB_REF_NAME"
-          --generate-notes
+        run: |
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || \
+            gh release create "$GITHUB_REF_NAME" \
+              --title "PourBot $GITHUB_REF_NAME" \
+              --generate-notes
+          gh release upload "$GITHUB_REF_NAME" \
+            .pio/build/LVGL-320-480/firmware.bin#firmware.bin \
+            --clobber
       - name: Prepare browser installer
         run: python tools/prepare_web_installer.py "$GITHUB_REF_NAME"
       - name: Attach full USB image to release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "$GITHUB_REF_NAME" site/firmware/pourbot-*.bin
+        run: gh release upload "$GITHUB_REF_NAME" site/firmware/pourbot-*.bin --clobber
       - uses: actions/configure-pages@v5
         with:
           enablement: true

@@ -1,4 +1,4 @@
 cmake_minimum_required(VERSION 3.16.0)
-set(PROJECT_VER "1.1.19")
+set(PROJECT_VER "1.1.20")
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(PourBot)
