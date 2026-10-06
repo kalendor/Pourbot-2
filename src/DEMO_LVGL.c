@@ -55,6 +55,9 @@ static lv_obj_t *chart_time_labels[4];
 static lv_obj_t *chart_weight_labels[5];
 static lv_obj_t *recipe_title_label;
 static lv_obj_t *recipe_dose_value_label;
+static lv_obj_t *pour_guidance_stage_shadow;
+static lv_obj_t *pour_guidance_timer_label;
+static lv_obj_t *pour_guidance_timer_shadow;
 static lv_obj_t *pour_guidance_fill;
 static lv_obj_t *recipe_target_value_label;
 static lv_obj_t *main_screen;
@@ -530,13 +533,46 @@ static void set_pour_guidance_fill(int progress)
     lv_obj_align(pour_guidance_fill, LV_ALIGN_BOTTOM_MID, 0, 0);
 }
 
+static void set_pour_guidance_text(const char *text)
+{
+    if (recipe_dose_value_label) lv_label_set_text(recipe_dose_value_label, text);
+    if (pour_guidance_stage_shadow) lv_label_set_text(pour_guidance_stage_shadow, text);
+}
+
+static void hide_pour_guidance_countdown(void)
+{
+    if (pour_guidance_timer_label)
+        lv_obj_add_flag(pour_guidance_timer_label, LV_OBJ_FLAG_HIDDEN);
+    if (pour_guidance_timer_shadow)
+        lv_obj_add_flag(pour_guidance_timer_shadow, LV_OBJ_FLAG_HIDDEN);
+}
+
+static void show_pour_guidance_countdown(int64_t remaining_us)
+{
+    if (remaining_us < 0) remaining_us = 0;
+    const uint32_t seconds = (uint32_t)((remaining_us + 999999) / 1000000);
+    const uint32_t minutes = seconds / 60;
+    const uint32_t remainder = seconds % 60;
+    if (pour_guidance_timer_label) {
+        lv_label_set_text_fmt(pour_guidance_timer_label, "%lu:%02lu",
+                              (unsigned long)minutes, (unsigned long)remainder);
+        lv_obj_clear_flag(pour_guidance_timer_label, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (pour_guidance_timer_shadow) {
+        lv_label_set_text_fmt(pour_guidance_timer_shadow, "%lu:%02lu",
+                              (unsigned long)minutes, (unsigned long)remainder);
+        lv_obj_clear_flag(pour_guidance_timer_shadow, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
 static void reset_pour_guidance(void)
 {
     guidance_stage_index = 0;
     guidance_holding = false;
     guidance_done = false;
     guidance_hold_started_elapsed_us = 0;
-    if (recipe_dose_value_label) lv_label_set_text(recipe_dose_value_label, "READY");
+    set_pour_guidance_text("READY");
+    hide_pour_guidance_countdown();
     set_pour_guidance_fill(0);
 }
 
@@ -551,7 +587,8 @@ static void update_pour_guidance(const pourbot_recipe_t *recipe, float grams,
     if (grams >= target) {
         guidance_done = true;
         guidance_holding = false;
-        lv_label_set_text(recipe_dose_value_label, "DONE");
+        set_pour_guidance_text("DONE");
+        hide_pour_guidance_countdown();
         set_pour_guidance_fill(1000);
         return;
     }
@@ -562,7 +599,10 @@ static void update_pour_guidance(const pourbot_recipe_t *recipe, float grams,
             ? recipe->bloom_hold_s : recipe->pour_hold_s;
         if (elapsed_us - guidance_hold_started_elapsed_us <
             (int64_t)hold_s * 1000000LL) {
-            lv_label_set_text(recipe_dose_value_label, "STOP");
+            set_pour_guidance_text("STOP");
+            show_pour_guidance_countdown(
+                (int64_t)hold_s * 1000000LL -
+                (elapsed_us - guidance_hold_started_elapsed_us));
             set_pour_guidance_fill(1000);
             return;
         }
@@ -577,7 +617,8 @@ static void update_pour_guidance(const pourbot_recipe_t *recipe, float grams,
         if (hold_s > 0) {
             guidance_holding = true;
             guidance_hold_started_elapsed_us = elapsed_us;
-            lv_label_set_text(recipe_dose_value_label, "STOP");
+            set_pour_guidance_text("STOP");
+            show_pour_guidance_countdown((int64_t)hold_s * 1000000LL);
             set_pour_guidance_fill(1000);
             return;
         }
@@ -585,11 +626,14 @@ static void update_pour_guidance(const pourbot_recipe_t *recipe, float grams,
     }
 
     if (guidance_stage_index == 0) {
-        lv_label_set_text(recipe_dose_value_label, "BLOOM");
+        set_pour_guidance_text("BLOOM");
     } else {
-        lv_label_set_text_fmt(recipe_dose_value_label, "POUR %u",
-                              (unsigned)guidance_stage_index);
+        char stage_text[16];
+        snprintf(stage_text, sizeof(stage_text), "POUR %u",
+                 (unsigned)guidance_stage_index);
+        set_pour_guidance_text(stage_text);
     }
+    hide_pour_guidance_countdown();
     const uint16_t current_start = guidance_stage_index == 0 ? 0 :
         guidance_stage_target(recipe, guidance_stage_index - 1);
     const uint16_t current_target = guidance_stage_target(recipe, guidance_stage_index);
@@ -1571,7 +1615,7 @@ static void recipe_save_event_cb(lv_event_t *event)
     lv_label_set_text(recipe_title_label, recipe_edit.name);
     if (dashboard_recipe_label) lv_label_set_text(dashboard_recipe_label, recipe_edit.name);
     if (recipe_dose_value_label && !brew_running && brew_elapsed_us == 0)
-        lv_label_set_text(recipe_dose_value_label, "READY");
+        set_pour_guidance_text("READY");
     if (recipe_target_value_label) {
         lv_label_set_text_fmt(recipe_target_value_label, "%u g\n1:%u.%u",
                               pourbot_recipe_target_g(&recipe_edit),
@@ -1858,13 +1902,37 @@ static void create_ui(void)
     lv_obj_set_style_bg_color(pour_guidance_fill, lv_color_hex(0xF2B94F), 0);
     lv_obj_set_style_bg_opa(pour_guidance_fill, LV_OPA_COVER, 0);
     lv_obj_clear_flag(pour_guidance_fill, LV_OBJ_FLAG_CLICKABLE);
+    pour_guidance_stage_shadow = lv_label_create(dose_card);
+    lv_label_set_text(pour_guidance_stage_shadow, "READY");
+    lv_obj_set_width(pour_guidance_stage_shadow, 126);
+    lv_obj_set_style_text_align(pour_guidance_stage_shadow, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_font(pour_guidance_stage_shadow, &lv_font_montserrat_24, 0);
+    lv_obj_set_style_text_color(pour_guidance_stage_shadow, lv_color_hex(0x111619), 0);
+    lv_obj_align(pour_guidance_stage_shadow, LV_ALIGN_CENTER, 1, -17);
     recipe_dose_value_label = lv_label_create(dose_card);
     lv_label_set_text(recipe_dose_value_label, "READY");
     lv_obj_set_width(recipe_dose_value_label, 126);
     lv_obj_set_style_text_align(recipe_dose_value_label, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_text_font(recipe_dose_value_label, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_font(recipe_dose_value_label, &lv_font_montserrat_24, 0);
     lv_obj_set_style_text_color(recipe_dose_value_label, lv_color_hex(0xF5F7F8), 0);
-    lv_obj_center(recipe_dose_value_label);
+    lv_obj_align(recipe_dose_value_label, LV_ALIGN_CENTER, 0, -18);
+
+    pour_guidance_timer_shadow = lv_label_create(dose_card);
+    lv_label_set_text(pour_guidance_timer_shadow, "0:00");
+    lv_obj_set_width(pour_guidance_timer_shadow, 126);
+    lv_obj_set_style_text_align(pour_guidance_timer_shadow, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_font(pour_guidance_timer_shadow, &lv_font_montserrat_22, 0);
+    lv_obj_set_style_text_color(pour_guidance_timer_shadow, lv_color_hex(0x111619), 0);
+    lv_obj_align(pour_guidance_timer_shadow, LV_ALIGN_CENTER, 1, 21);
+    lv_obj_add_flag(pour_guidance_timer_shadow, LV_OBJ_FLAG_HIDDEN);
+    pour_guidance_timer_label = lv_label_create(dose_card);
+    lv_label_set_text(pour_guidance_timer_label, "0:00");
+    lv_obj_set_width(pour_guidance_timer_label, 126);
+    lv_obj_set_style_text_align(pour_guidance_timer_label, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_font(pour_guidance_timer_label, &lv_font_montserrat_22, 0);
+    lv_obj_set_style_text_color(pour_guidance_timer_label, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_align(pour_guidance_timer_label, LV_ALIGN_CENTER, 0, 20);
+    lv_obj_add_flag(pour_guidance_timer_label, LV_OBJ_FLAG_HIDDEN);
 
     lv_obj_t *target_card = make_panel(screen, 126, 142, 0x0B1217);
     main_target_card = target_card;
