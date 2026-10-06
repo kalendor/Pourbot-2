@@ -144,6 +144,7 @@ static void archive_current_pour(void);
 /* All battery UI state belongs to the LVGL mutex, including rebuilt recipe widgets. */
 static lv_obj_t *battery_labels[2];
 static int battery_percent = -1;
+static bool battery_charging;
 
 static void render_battery_label(lv_obj_t *label)
 {
@@ -157,7 +158,8 @@ static void render_battery_label(lv_obj_t *label)
         battery_percent >= 63 ? LV_SYMBOL_BATTERY_3 :
         battery_percent >= 38 ? LV_SYMBOL_BATTERY_2 :
         battery_percent >= 13 ? LV_SYMBOL_BATTERY_1 : LV_SYMBOL_BATTERY_EMPTY;
-    lv_label_set_text_fmt(label, "%s %d%%", symbol, battery_percent);
+    lv_label_set_text_fmt(label, battery_charging ? LV_SYMBOL_CHARGE " %s %d%%" : "%s %d%%",
+                          symbol, battery_percent);
     lv_obj_set_style_text_color(label, lv_color_hex(battery_percent <= 10
         ? 0xEF4444 : battery_percent <= 20 ? 0xF2B94F : 0x4ADE80), 0);
 }
@@ -181,11 +183,11 @@ static void battery_task(void *argument)
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
     bool gauge_online = false;
+    int64_t charging_seen_us = 0;
     while (!standby_active) {
-        uint8_t percent;
-        uint16_t millivolts;
+        battery_gauge_sample_t sample;
         /* I2C never runs in the scale task or while holding the LVGL mutex. */
-        esp_err_t result = battery_gauge_read(&percent, &millivolts);
+        esp_err_t result = battery_gauge_read(&sample);
         if (result != ESP_OK) {
             /* Repeat while unavailable so the diagnostic remains visible after
              * USB CDC reconnects following boot. Successful systems stay quiet. */
@@ -193,20 +195,26 @@ static void battery_task(void *argument)
                      esp_err_to_name(result), (unsigned)result);
             gauge_online = false;
         } else if (!gauge_online) {
-            ESP_LOGI(TAG, "MAX17048 detected: %u%%, %u mV", percent, millivolts);
+            ESP_LOGI(TAG, "MAX17048 detected: %u%%, %u mV", sample.percent,
+                     sample.millivolts);
             gauge_online = true;
         }
+        const int64_t now_us = esp_timer_get_time();
+        if (result == ESP_OK && sample.charging) charging_seen_us = now_us;
+        const bool next_charging = result == ESP_OK && charging_seen_us > 0 &&
+            now_us - charging_seen_us < 15000000;
         /* Do not discard a good reading just because LVGL is busy during
          * startup. Wait for the UI lock; subsequent samples remain infrequent. */
         if (!standby_active && bsp_display_lock(1000)) {
-            const int next = result == ESP_OK ? percent : -1;
-            if (next != battery_percent) {
+            const int next = result == ESP_OK ? sample.percent : -1;
+            if (next != battery_percent || next_charging != battery_charging) {
                 battery_percent = next;
+                battery_charging = next_charging;
                 for (unsigned i = 0; i < 2; ++i) render_battery_label(battery_labels[i]);
             }
             bsp_display_unlock();
         }
-        vTaskDelay(pdMS_TO_TICKS(5000));
+        vTaskDelay(pdMS_TO_TICKS(2000));
     }
     vTaskDelete(NULL);
 }
