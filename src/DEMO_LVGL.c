@@ -178,17 +178,21 @@ static void battery_task(void *argument)
         vTaskDelete(NULL);
         return;
     }
-    bool warned = false;
+    bool gauge_online = false;
     while (!standby_active) {
         uint8_t percent;
         uint16_t millivolts;
         /* I2C never runs in the scale task or while holding the LVGL mutex. */
         esp_err_t result = battery_gauge_read(&percent, &millivolts);
-        if (result != ESP_OK && !warned) {
-            ESP_LOGW(TAG, "MAX17048 unavailable on GPIO7/15: %s", esp_err_to_name(result));
-            warned = true;
-        } else if (result == ESP_OK) {
-            warned = false;
+        if (result != ESP_OK) {
+            /* Repeat while unavailable so the diagnostic remains visible after
+             * USB CDC reconnects following boot. Successful systems stay quiet. */
+            ESP_LOGW(TAG, "MAX17048 read failed at 0x36 on SDA GPIO7 / SCL GPIO15: %s (0x%x)",
+                     esp_err_to_name(result), (unsigned)result);
+            gauge_online = false;
+        } else if (!gauge_online) {
+            ESP_LOGI(TAG, "MAX17048 detected: %u%%, %u mV", percent, millivolts);
+            gauge_online = true;
         }
         if (!standby_active && bsp_display_lock(100)) {
             const int next = result == ESP_OK ? percent : -1;
