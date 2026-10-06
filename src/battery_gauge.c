@@ -9,9 +9,11 @@
 #define GAUGE_TIMEOUT pdMS_TO_TICKS(20)
 
 static const char *TAG = "battery_gauge";
+static bool gauge_bus_ready;
 
 esp_err_t battery_gauge_init(void)
 {
+    if (gauge_bus_ready) return ESP_OK;
     const i2c_config_t config = {
         .mode = I2C_MODE_MASTER,
         .sda_io_num = BATTERY_I2C_SDA,
@@ -23,7 +25,14 @@ esp_err_t battery_gauge_init(void)
     };
     esp_err_t result = i2c_param_config(GAUGE_BUS, &config);
     if (result != ESP_OK) return result;
-    return i2c_driver_install(GAUGE_BUS, I2C_MODE_MASTER, 0, 0, 0);
+    result = i2c_driver_install(GAUGE_BUS, I2C_MODE_MASTER, 0, 0, 0);
+    /* This is a dedicated bus. INVALID_STATE means it was already installed
+     * by an earlier attempt, so it is safe to continue using it. */
+    if (result == ESP_OK || result == ESP_ERR_INVALID_STATE) {
+        gauge_bus_ready = true;
+        return ESP_OK;
+    }
+    return result;
 }
 
 esp_err_t battery_gauge_read(uint8_t *percent, uint16_t *millivolts)

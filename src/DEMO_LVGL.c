@@ -173,10 +173,12 @@ static void add_battery_label(lv_obj_t *screen, unsigned index)
 static void battery_task(void *argument)
 {
     (void)argument;
-    if (battery_gauge_init() != ESP_OK) {
-        ESP_LOGW(TAG, "Battery I2C initialization failed; gauge unavailable");
-        vTaskDelete(NULL);
-        return;
+    esp_err_t init_result;
+    while (!standby_active &&
+           (init_result = battery_gauge_init()) != ESP_OK) {
+        ESP_LOGW(TAG, "Battery I2C initialization failed; retrying: %s (0x%x)",
+                 esp_err_to_name(init_result), (unsigned)init_result);
+        vTaskDelay(pdMS_TO_TICKS(1000));
     }
     bool gauge_online = false;
     while (!standby_active) {
@@ -194,7 +196,9 @@ static void battery_task(void *argument)
             ESP_LOGI(TAG, "MAX17048 detected: %u%%, %u mV", percent, millivolts);
             gauge_online = true;
         }
-        if (!standby_active && bsp_display_lock(100)) {
+        /* Do not discard a good reading just because LVGL is busy during
+         * startup. Wait for the UI lock; subsequent samples remain infrequent. */
+        if (!standby_active && bsp_display_lock(1000)) {
             const int next = result == ESP_OK ? percent : -1;
             if (next != battery_percent) {
                 battery_percent = next;
