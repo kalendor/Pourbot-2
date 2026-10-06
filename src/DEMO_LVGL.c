@@ -183,7 +183,9 @@ static void battery_task(void *argument)
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
     bool gauge_online = false;
-    int64_t charging_seen_us = 0;
+    int64_t charge_window_started_us = 0;
+    uint16_t charge_window_start_mv = 0;
+    bool charge_rate_positive = true;
     while (!standby_active) {
         battery_gauge_sample_t sample;
         /* I2C never runs in the scale task or while holding the LVGL mutex. */
@@ -200,9 +202,32 @@ static void battery_task(void *argument)
             gauge_online = true;
         }
         const int64_t now_us = esp_timer_get_time();
-        if (result == ESP_OK && sample.charging) charging_seen_us = now_us;
-        const bool next_charging = result == ESP_OK && charging_seen_us > 0 &&
-            now_us - charging_seen_us < 15000000;
+        bool next_charging = battery_charging;
+        if (result != ESP_OK) {
+            next_charging = false;
+            charge_window_started_us = 0;
+        } else if (charge_window_started_us == 0) {
+            charge_window_started_us = now_us;
+            charge_window_start_mv = sample.millivolts;
+            charge_rate_positive = sample.rate_tenths_per_hour >= 10;
+            next_charging = false;
+        } else {
+            charge_rate_positive = charge_rate_positive &&
+                sample.rate_tenths_per_hour >= 10;
+            /* CRATE alone can stay slightly positive after USB is removed.
+             * Only show charging after a full window also gains cell voltage. */
+            if (now_us - charge_window_started_us >= 10000000) {
+                const int voltage_change = (int)sample.millivolts -
+                    (int)charge_window_start_mv;
+                next_charging = charge_rate_positive && voltage_change >= 2;
+                charge_window_started_us = now_us;
+                charge_window_start_mv = sample.millivolts;
+                charge_rate_positive = sample.rate_tenths_per_hour >= 10;
+            } else if (sample.rate_tenths_per_hour <= 0 ||
+                       sample.millivolts + 2 < charge_window_start_mv) {
+                next_charging = false;
+            }
+        }
         /* Do not discard a good reading just because LVGL is busy during
          * startup. Wait for the UI lock; subsequent samples remain infrequent. */
         if (!standby_active && bsp_display_lock(1000)) {
