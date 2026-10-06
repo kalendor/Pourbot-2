@@ -1,11 +1,14 @@
 #include "battery_gauge.h"
 
 #include "driver/i2c.h"
+#include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 
 #define GAUGE_BUS I2C_NUM_1
 #define GAUGE_ADDRESS 0x36
 #define GAUGE_TIMEOUT pdMS_TO_TICKS(20)
+
+static const char *TAG = "battery_gauge";
 
 esp_err_t battery_gauge_init(void)
 {
@@ -43,8 +46,13 @@ esp_err_t battery_gauge_read(uint8_t *percent, uint16_t *millivolts)
     const uint16_t soc = ((uint16_t)data[2] << 8) | data[3];
     /* VCELL LSB = 78.125 uV, SOC LSB = 1/256 percent. */
     const uint32_t mv = ((uint32_t)cell * 625 + 4000) / 8000;
-    if (mv < 2500 || mv > 4500 || soc > 110 * 256)
+    if (mv < 2500 || mv > 4500 || soc > 110 * 256) {
+        ESP_LOGW(TAG,
+            "MAX17048 raw VCELL=%02X%02X (%lu mV), SOC=%02X%02X (%u.%02u%%)",
+            data[0], data[1], (unsigned long)mv, data[2], data[3],
+            soc / 256, ((soc & 0xFF) * 100) / 256);
         return ESP_ERR_INVALID_RESPONSE;
+    }
     uint16_t rounded = (soc + 128) / 256;
     *percent = rounded > 100 ? 100 : (uint8_t)rounded;
     *millivolts = (uint16_t)mv;
