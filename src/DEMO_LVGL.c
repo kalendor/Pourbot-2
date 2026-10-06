@@ -13,6 +13,7 @@
 #include "ota_manager.h"
 #include "wifi_manager.h"
 #include "esp_heap_caps.h"
+#include "esp_attr.h"
 #include "esp_bsp.h"
 #include "esp_log.h"
 #include "esp_ota_ops.h"
@@ -151,7 +152,9 @@ static void archive_current_pour(void);
 
 /* All battery UI state belongs to the LVGL mutex, including rebuilt recipe widgets. */
 static lv_obj_t *battery_labels[2];
-static int battery_percent = -1;
+/* Keep the most recent valid gauge result through deep-sleep standby so the
+ * header is useful immediately after wake, while the I2C gauge reconnects. */
+RTC_DATA_ATTR static int battery_percent = -1;
 static bool battery_charging;
 
 static void render_battery_label(lv_obj_t *label)
@@ -239,7 +242,9 @@ static void battery_task(void *argument)
         /* Do not discard a good reading just because LVGL is busy during
          * startup. Wait for the UI lock; subsequent samples remain infrequent. */
         if (!standby_active && bsp_display_lock(1000)) {
-            const int next = result == ESP_OK ? sample.percent : -1;
+            /* A momentary I2C miss must not erase a valid battery reading.
+             * The task keeps polling and replaces it on the next good sample. */
+            const int next = result == ESP_OK ? sample.percent : battery_percent;
             if (next != battery_percent || next_charging != battery_charging) {
                 battery_percent = next;
                 battery_charging = next_charging;
