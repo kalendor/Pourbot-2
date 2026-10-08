@@ -3,6 +3,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <inttypes.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -179,20 +180,43 @@ static bool load_file(const char *name, pour_archive_result_t *result)
     snprintf(path, sizeof(path), ARCHIVE_DIR "/%s", name);
     FILE *file = fopen(path, "r");
     if (!file) return false;
-    bool ok = read_header(file, &result->selected) && fgets(line, sizeof(line), file);
+    bool ok = read_header(file, &result->selected);
     strlcpy(result->selected.filename, name, sizeof(result->selected.filename));
+    const uint16_t expected_count = result->selected.count;
+    uint16_t recovered_count = 0;
     uint32_t previous = 0;
-    for (unsigned i = 0; ok && i < result->selected.count; ++i) {
-        pour_sample_t *s = &result->samples[i];
-        int32_t w, wd, f, fd;
-        ok = fgets(line, sizeof(line), file) && sscanf(line,
-            "%" SCNu32 ",%" SCNd32 ".%" SCNd32 ",%" SCNd32 ".%" SCNd32,
-            &s->seconds, &w, &wd, &f, &fd) == 5 && s->seconds >= previous &&
-            w >= 0 && w <= 30000 && f >= 0 && f <= 3000 && wd >= 0 && wd <= 9 && fd >= 0 && fd <= 9;
-        if (ok) { s->weight_tenths = w * 10 + wd; s->flow_tenths = f * 10 + fd; previous = s->seconds; }
+    while (ok && recovered_count < expected_count && fgets(line, sizeof(line), file)) {
+        char *cursor = line;
+        char *end = NULL;
+        errno = 0;
+        unsigned long seconds = strtoul(cursor, &end, 10);
+        if (errno || end == cursor || *end != ',' || seconds > UINT32_MAX) continue;
+        cursor = end + 1;
+        errno = 0;
+        double weight = strtod(cursor, &end);
+        if (errno || end == cursor || *end != ',' || !isfinite(weight)) continue;
+        cursor = end + 1;
+        errno = 0;
+        double flow = strtod(cursor, &end);
+        if (errno || end == cursor || !isfinite(flow)) continue;
+        while (*end == ' ' || *end == '\t' || *end == '\r' || *end == '\n') end++;
+        if (*end != 0 || seconds < previous || weight < -10.0 || weight > 30000.0 ||
+            flow < -10.0 || flow > 3000.0) continue;
+
+        /* Older or interrupted records may contain a damaged row. Preserve
+         * every valid chronological sample instead of rejecting the pour. */
+        pour_sample_t *sample = &result->samples[recovered_count++];
+        if (weight < 0.0) weight = 0.0;
+        if (flow < 0.0) flow = 0.0;
+        sample->seconds = (uint32_t)seconds;
+        sample->weight_tenths = (int32_t)(weight * 10.0 + 0.5);
+        sample->flow_tenths = (int32_t)(flow * 10.0 + 0.5);
+        previous = sample->seconds;
     }
+    if (ferror(file)) ok = false;
     fclose(file);
-    return ok;
+    result->selected.count = recovered_count;
+    return ok && recovered_count > 0;
 }
 
 static bool delete_file(const char *name, pour_archive_result_t *result)

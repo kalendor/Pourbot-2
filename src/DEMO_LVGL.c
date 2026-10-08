@@ -1953,7 +1953,7 @@ static void create_ui(void)
     lv_label_set_text(pour_guidance_timer_shadow, "0:00");
     lv_obj_set_width(pour_guidance_timer_shadow, 126);
     lv_obj_set_style_text_align(pour_guidance_timer_shadow, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_text_font(pour_guidance_timer_shadow, &lv_font_montserrat_18, 0);
+    lv_obj_set_style_text_font(pour_guidance_timer_shadow, &lv_font_montserrat_16, 0);
     lv_obj_set_style_text_color(pour_guidance_timer_shadow, lv_color_hex(0x111619), 0);
     lv_obj_align(pour_guidance_timer_shadow, LV_ALIGN_CENTER, 1, 21);
     lv_obj_add_flag(pour_guidance_timer_shadow, LV_OBJ_FLAG_HIDDEN);
@@ -1961,7 +1961,7 @@ static void create_ui(void)
     lv_label_set_text(pour_guidance_timer_label, "0:00");
     lv_obj_set_width(pour_guidance_timer_label, 126);
     lv_obj_set_style_text_align(pour_guidance_timer_label, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_text_font(pour_guidance_timer_label, &lv_font_montserrat_18, 0);
+    lv_obj_set_style_text_font(pour_guidance_timer_label, &lv_font_montserrat_16, 0);
     lv_obj_set_style_text_color(pour_guidance_timer_label, lv_color_hex(0xFFFFFF), 0);
     lv_obj_align(pour_guidance_timer_label, LV_ALIGN_CENTER, 0, 20);
     lv_obj_add_flag(pour_guidance_timer_label, LV_OBJ_FLAG_HIDDEN);
