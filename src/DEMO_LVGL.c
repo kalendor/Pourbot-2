@@ -583,6 +583,20 @@ static void show_pour_guidance_countdown(int64_t remaining_us)
     }
 }
 
+static void show_pour_guidance_target(uint16_t target_g)
+{
+    if (pour_guidance_timer_label) {
+        lv_label_set_text_fmt(pour_guidance_timer_label, "STOP AT %u g",
+                              (unsigned)target_g);
+        lv_obj_clear_flag(pour_guidance_timer_label, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (pour_guidance_timer_shadow) {
+        lv_label_set_text_fmt(pour_guidance_timer_shadow, "STOP AT %u g",
+                              (unsigned)target_g);
+        lv_obj_clear_flag(pour_guidance_timer_shadow, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
 static void reset_pour_guidance(void)
 {
     guidance_stage_index = 0;
@@ -651,10 +665,10 @@ static void update_pour_guidance(const pourbot_recipe_t *recipe, float grams,
                  (unsigned)guidance_stage_index);
         set_pour_guidance_text(stage_text);
     }
-    hide_pour_guidance_countdown();
     const uint16_t current_start = guidance_stage_index == 0 ? 0 :
         guidance_stage_target(recipe, guidance_stage_index - 1);
     const uint16_t current_target = guidance_stage_target(recipe, guidance_stage_index);
+    show_pour_guidance_target(current_target);
     int progress = current_target > current_start
         ? (int)((grams - current_start) * 1000.0f /
                 (float)(current_target - current_start)) : 1000;
@@ -1939,7 +1953,7 @@ static void create_ui(void)
     lv_label_set_text(pour_guidance_timer_shadow, "0:00");
     lv_obj_set_width(pour_guidance_timer_shadow, 126);
     lv_obj_set_style_text_align(pour_guidance_timer_shadow, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_text_font(pour_guidance_timer_shadow, &lv_font_montserrat_22, 0);
+    lv_obj_set_style_text_font(pour_guidance_timer_shadow, &lv_font_montserrat_18, 0);
     lv_obj_set_style_text_color(pour_guidance_timer_shadow, lv_color_hex(0x111619), 0);
     lv_obj_align(pour_guidance_timer_shadow, LV_ALIGN_CENTER, 1, 21);
     lv_obj_add_flag(pour_guidance_timer_shadow, LV_OBJ_FLAG_HIDDEN);
@@ -1947,7 +1961,7 @@ static void create_ui(void)
     lv_label_set_text(pour_guidance_timer_label, "0:00");
     lv_obj_set_width(pour_guidance_timer_label, 126);
     lv_obj_set_style_text_align(pour_guidance_timer_label, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_text_font(pour_guidance_timer_label, &lv_font_montserrat_22, 0);
+    lv_obj_set_style_text_font(pour_guidance_timer_label, &lv_font_montserrat_18, 0);
     lv_obj_set_style_text_color(pour_guidance_timer_label, lv_color_hex(0xFFFFFF), 0);
     lv_obj_align(pour_guidance_timer_label, LV_ALIGN_CENTER, 0, 20);
     lv_obj_add_flag(pour_guidance_timer_label, LV_OBJ_FLAG_HIDDEN);
