@@ -29,6 +29,7 @@
 
 static const char *TAG = "nau7802";
 static bool initialized;
+static bool bus_configured;
 
 static esp_err_t read_reg(uint8_t reg, uint8_t *data, size_t length)
 {
@@ -68,18 +69,23 @@ bool nau7802_init(void)
 {
     if (initialized) return true;
 
-    const i2c_config_t config = {
-        .mode = I2C_MODE_MASTER,
-        .sda_io_num = BATTERY_I2C_SDA,
-        .scl_io_num = BATTERY_I2C_SCL,
-        .sda_pullup_en = GPIO_PULLUP_DISABLE,
-        .scl_pullup_en = GPIO_PULLUP_DISABLE,
-        .master.clk_speed = 100000,
-    };
-    esp_err_t result = i2c_param_config(NAU_BUS, &config);
-    if (result != ESP_OK) return false;
-    result = i2c_driver_install(NAU_BUS, I2C_MODE_MASTER, 0, 0, 0);
-    if (result != ESP_OK && result != ESP_ERR_INVALID_STATE) return false;
+    if (!bus_configured) {
+        const i2c_config_t config = {
+            .mode = I2C_MODE_MASTER,
+            .sda_io_num = BATTERY_I2C_SDA,
+            .scl_io_num = BATTERY_I2C_SCL,
+            /* Breakout pull-ups remain primary; these make loose jumper-wire
+             * installations more tolerant without affecting either device. */
+            .sda_pullup_en = GPIO_PULLUP_ENABLE,
+            .scl_pullup_en = GPIO_PULLUP_ENABLE,
+            .master.clk_speed = 100000,
+        };
+        esp_err_t result = i2c_param_config(NAU_BUS, &config);
+        if (result != ESP_OK) return false;
+        result = i2c_driver_install(NAU_BUS, I2C_MODE_MASTER, 0, 0, 0);
+        if (result != ESP_OK && result != ESP_ERR_INVALID_STATE) return false;
+        bus_configured = true;
+    }
 
     uint8_t revision;
     if (read_reg(REG_REVISION, &revision, 1) != ESP_OK ||
@@ -120,6 +126,14 @@ bool nau7802_init(void)
     initialized = true;
     ESP_LOGI(TAG, "NAU7802 ready at 80 SPS, gain 128");
     return true;
+}
+
+bool nau7802_reconnect(void)
+{
+    /* Keep shared controller 1 installed so the MAX17048 is not interrupted.
+     * Reset and initialize only the scale converter at address 0x2A. */
+    initialized = false;
+    return nau7802_init();
 }
 
 bool nau7802_read(int32_t *value)

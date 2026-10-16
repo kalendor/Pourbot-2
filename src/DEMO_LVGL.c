@@ -2525,12 +2525,23 @@ static void scale_task(void *argument)
     float flow_samples[3] = {0};
     int flow_count = 0;
     int flow_index = 0;
+    unsigned read_failures = 0;
+    int64_t next_reconnect_us = 0;
 
     while (true) {
         /* Never access the NAU7802 after the standby task powers it down. */
         if (standby_active) {
             vTaskDelay(pdMS_TO_TICKS(20));
             continue;
+        }
+        const int64_t loop_now_us = esp_timer_get_time();
+        if (!boot_scale_ready && loop_now_us >= next_reconnect_us) {
+            if (nau7802_reconnect()) {
+                ESP_LOGI(TAG, "NAU7802 reconnected; establishing a fresh zero");
+                tare_requested = true;
+                read_failures = 0;
+            }
+            next_reconnect_us = loop_now_us + 2000000;
         }
         if (calibration_tare_requested) {
             int32_t new_offset;
@@ -2610,6 +2621,7 @@ static void scale_task(void *argument)
                 movement_direction = 0;
                 moving_until_us = 0;
                 tare_requested = false;
+                boot_scale_ready = true;
                 ESP_LOGI(TAG, "Tare offset: %" PRId32, tare_offset);
             } else {
                 update_ui(false, last_reading - tare_offset);
@@ -2619,6 +2631,7 @@ static void scale_task(void *argument)
         }
 
         if (nau7802_read(&last_reading)) {
+            read_failures = 0;
             const int32_t raw_relative = last_reading - tare_offset;
             const int64_t now_us = esp_timer_get_time();
             if (!filter_initialized) {
@@ -2684,6 +2697,11 @@ static void scale_task(void *argument)
             }
             update_ui(true, filtered_relative);
         } else {
+            if (++read_failures >= 8) {
+                boot_scale_ready = false;
+                read_failures = 0;
+                next_reconnect_us = 0;
+            }
             update_ui(false, filter_initialized
                 ? filtered_relative : last_reading - tare_offset);
         }
