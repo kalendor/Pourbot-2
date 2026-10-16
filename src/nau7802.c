@@ -24,6 +24,7 @@
 #define PU_PUD (1U << 1)
 #define PU_PUA (1U << 2)
 #define PU_PUR (1U << 3)
+#define PU_CS (1U << 4)
 #define PU_CR (1U << 5)
 #define PU_AVDDS (1U << 7)
 
@@ -96,10 +97,16 @@ bool nau7802_init(void)
 
     /* SparkFun's proven initialization sequence: reset, power analog and
      * digital sections, 3.3 V LDO, gain 128, 80 SPS, then calibrate the AFE. */
-    if (!update_reg(REG_PU_CTRL, 0, PU_RR) ||
-        !update_reg(REG_PU_CTRL, PU_RR, 0) ||
-        !update_reg(REG_PU_CTRL, 0, PU_PUD | PU_PUA) ||
+    if (!update_reg(REG_PU_CTRL, 0, PU_RR)) {
+        ESP_LOGE(TAG, "NAU7802 reset failed");
+        return false;
+    }
+    vTaskDelay(pdMS_TO_TICKS(1));
+    if (!update_reg(REG_PU_CTRL, PU_RR, 0) ||
+        !update_reg(REG_PU_CTRL, 0, PU_PUD) ||
+        !update_reg(REG_PU_CTRL, 0, PU_PUA) ||
         !wait_for_bits(REG_PU_CTRL, PU_PUR, true, 250) ||
+        !update_reg(REG_PU_CTRL, 0, PU_CS) ||
         !update_reg(REG_CTRL1, 0x3F, (4U << 3) | 7U) ||
         !update_reg(REG_PU_CTRL, 0, PU_AVDDS) ||
         !update_reg(REG_CTRL2, 0x70, (3U << 4)) ||
