@@ -167,10 +167,16 @@ static void render_battery_label(lv_obj_t *label)
         battery_percent >= 63 ? LV_SYMBOL_BATTERY_3 :
         battery_percent >= 38 ? LV_SYMBOL_BATTERY_2 :
         battery_percent >= 13 ? LV_SYMBOL_BATTERY_1 : LV_SYMBOL_BATTERY_EMPTY;
-    lv_label_set_text_fmt(label, battery_charging ? LV_SYMBOL_CHARGE " %s %d%%" : "%s %d%%",
-                          symbol, battery_percent);
-    lv_obj_set_style_text_color(label, lv_color_hex(battery_percent <= 10
-        ? 0xEF4444 : battery_percent <= 20 ? 0xF2B94F : 0x4ADE80), 0);
+    if (battery_charging) {
+        /* Make external-power activity unmistakable without consuming more
+         * header space than the normal battery readout. */
+        lv_label_set_text_fmt(label, LV_SYMBOL_CHARGE " CHG %d%%", battery_percent);
+        lv_obj_set_style_text_color(label, lv_color_hex(0xF2B94F), 0);
+    } else {
+        lv_label_set_text_fmt(label, "%s %d%%", symbol, battery_percent);
+        lv_obj_set_style_text_color(label, lv_color_hex(battery_percent <= 10
+            ? 0xEF4444 : battery_percent <= 20 ? 0xF2B94F : 0x4ADE80), 0);
+    }
 }
 
 static void add_battery_label(lv_obj_t *screen, unsigned index)
