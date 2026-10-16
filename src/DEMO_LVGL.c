@@ -357,12 +357,20 @@ static void format_fixed(char *buffer, size_t size, float value, uint32_t decima
 static lv_obj_t *make_panel(lv_obj_t *parent, lv_coord_t width, lv_coord_t height,
                             uint32_t color);
 
-static int32_t median3(int32_t a, int32_t b, int32_t c)
+static int32_t median5(const int32_t input[5])
 {
-    if (a > b) { int32_t t = a; a = b; b = t; }
-    if (b > c) { int32_t t = b; b = c; c = t; }
-    if (a > b) { int32_t t = a; a = b; b = t; }
-    return b;
+    int32_t values[5];
+    memcpy(values, input, sizeof(values));
+    for (int i = 1; i < 5; ++i) {
+        int32_t value = values[i];
+        int j = i - 1;
+        while (j >= 0 && values[j] > value) {
+            values[j + 1] = values[j];
+            --j;
+        }
+        values[j + 1] = value;
+    }
+    return values[2];
 }
 
 static void save_calibration_factor(void)
@@ -2514,7 +2522,7 @@ static void scale_task(void *argument)
         vTaskDelay(pdMS_TO_TICKS(10));
     }
     int32_t last_reading = 0;
-    int32_t samples[3] = {0};
+    int32_t samples[5] = {0};
     int sample_index = 0;
     int32_t filtered_relative = 0;
     bool filter_initialized = false;
@@ -2522,7 +2530,7 @@ static void scale_task(void *argument)
     int64_t moving_until_us = 0;
     int movement_votes = 0;
     int movement_direction = 0;
-    float flow_samples[3] = {0};
+    float flow_samples[5] = {0};
     int flow_count = 0;
     int flow_index = 0;
     unsigned read_failures = 0;
@@ -2636,17 +2644,17 @@ static void scale_task(void *argument)
             const int64_t now_us = esp_timer_get_time();
             if (!filter_initialized) {
                 filtered_relative = raw_relative;
-                samples[0] = samples[1] = samples[2] = raw_relative;
+                for (int i = 0; i < 5; ++i) samples[i] = raw_relative;
                 sample_index = 0;
                 filter_initialized = true;
                 last_sample_us = now_us;
             } else {
-                /* Reject isolated ADC/serial outliers BEFORE detecting motion.
-                 * A large raw spike must not bypass the median filter. Real
-                 * steps pass as soon as two of the three readings agree. */
+                /* At 80 SPS the NAU7802 exposes more short ADC noise than the
+                 * old HX711 path. Median-of-five rejects one- and two-sample
+                 * excursions while adding only about 25 ms of latency. */
                 samples[sample_index] = raw_relative;
-                sample_index = (sample_index + 1) % 3;
-                const int32_t candidate = median3(samples[0], samples[1], samples[2]);
+                sample_index = (sample_index + 1) % 5;
+                const int32_t candidate = median5(samples);
                 float abs_factor = calibration_factor < 0.0f
                     ? -calibration_factor : calibration_factor;
                 if (abs_factor < 1.0f) abs_factor = 1.0f;
@@ -2654,7 +2662,7 @@ static void scale_task(void *argument)
                 float change_g = (float)(raw_delta < 0 ? -raw_delta : raw_delta) / abs_factor;
 
                 const int direction = raw_delta > 0 ? 1 : (raw_delta < 0 ? -1 : 0);
-                if (change_g >= 0.25f) {
+                if (change_g >= 0.40f) {
                     if (direction == movement_direction) {
                         movement_votes++;
                     } else {
@@ -2665,8 +2673,8 @@ static void scale_task(void *argument)
                     movement_votes = 0;
                     movement_direction = 0;
                 }
-                if (change_g > 5.0f || movement_votes >= 3) {
-                    moving_until_us = now_us + 450000;
+                if (change_g > 5.0f || movement_votes >= 4) {
+                    moving_until_us = now_us + 300000;
                 }
                 scale_is_moving = now_us < moving_until_us;
 
@@ -2674,10 +2682,10 @@ static void scale_task(void *argument)
                 if (scale_is_moving) {
                     filtered_relative = candidate;
                 } else {
-                    /* Once stationary, use a short IIR low-pass filter. It
-                     * removes conversion noise without delaying real pours,
-                     * because movement immediately switches back to median-3. */
-                    filtered_relative += (candidate - filtered_relative) / 8;
+                    /* Stronger stationary smoothing removes sub-gram jitter.
+                     * Confirmed motion immediately switches back to the fast
+                     * median path, preserving responsive pours. */
+                    filtered_relative += (candidate - filtered_relative) / 16;
                 }
 
                 const float dt = (float)(now_us - last_sample_us) / 1000000.0f;
@@ -2686,8 +2694,8 @@ static void scale_task(void *argument)
                                   calibration_factor) / dt;
                     if (rate < 0.0f || rate < 0.35f) rate = 0.0f;
                     flow_samples[flow_index] = rate;
-                    flow_index = (flow_index + 1) % 3;
-                    if (flow_count < 3) flow_count++;
+                    flow_index = (flow_index + 1) % 5;
+                    if (flow_count < 5) flow_count++;
                     float total = 0.0f;
                     for (int i = 0; i < flow_count; ++i) total += flow_samples[i];
                     scale_flow_gps = total / (float)flow_count;
