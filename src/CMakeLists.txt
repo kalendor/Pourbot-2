@@ -3,6 +3,7 @@
 
 set(app_sources
     DEMO_LVGL.c
+    nau7802.c
     battery_gauge.c
     pour_archive.c
     ota_manager.c

@@ -8,7 +8,8 @@
 #define BATTERY_I2C_SDA GPIO_NUM_7
 #define BATTERY_I2C_SCL GPIO_NUM_15
 
-/* Dedicated controller 1; never reconfigures the touchscreen controller 0. */
+/* Shared controller 1 for NAU7802 (0x2A) and MAX17048 (0x36); the touchscreen
+ * remains isolated on controller 0. */
 typedef struct {
     uint8_t percent;
     uint16_t millivolts;

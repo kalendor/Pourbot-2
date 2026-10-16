@@ -44,7 +44,7 @@ PourBot stores up to 25 brew files on the microSD card. Each saved brew includes
 | --- | --- |
 | **Guition JC3248W535C** | The ESP32-S3 controller, 3.5-inch touchscreen, USB connection, battery input, and built-in charging hardware. |
 | **3–5 kg load cell** | Sits beneath the weighing platform and bends by a tiny amount as weight is added. |
-| **HX711 board** | Converts the load cell's very small signal into stable weight readings PourBot can use. |
+| **NAU7802 board** | Converts the load cell's very small signal into fast, stable weight readings PourBot can use. |
 | **microSD card** | Stores the most recent brew graphs and statistics. A FAT32-formatted card works best. |
 | **1000 mAh LiPo battery** | Powers PourBot away from USB. It connects through the display board's battery socket. |
 | **Optional MAX17048 gauge** | Estimates the battery's remaining charge and reports it to PourBot. |
@@ -56,12 +56,12 @@ PourBot stores up to 25 brew files on the microSD card. Each saved brew includes
 [Open the illustrated wiring and assembly guide](https://kalendor.github.io/Pourbot-2/wiring.html).
 
 
-The display board and HX711 use a shared 3.3 V supply and ground.
+The display board, NAU7802, and MAX17048 use a shared 3.3 V supply and ground.
 
 | Connection | PourBot pin |
 | --- | --- |
-| HX711 data / DOUT | GPIO17 |
-| HX711 clock / SCK | GPIO18 |
+| NAU7802 SDA | GPIO7 |
+| NAU7802 SCL | GPIO15 |
 | Standby wake button | GPIO6 to GND |
 | MAX17048 SDA | GPIO7 |
 | MAX17048 SCL | GPIO15 |

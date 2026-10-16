@@ -9,6 +9,7 @@
 #include "driver/rtc_io.h"
 #include "display.h"
 #include "battery_gauge.h"
+#include "nau7802.h"
 #include "pour_archive.h"
 #include "ota_manager.h"
 #include "wifi_manager.h"
@@ -30,8 +31,6 @@ LV_FONT_DECLARE(font_weight_72);
 #include "recipes.h"
 #include "splash_logo.h"
 
-#define HX711_DOUT GPIO_NUM_17
-#define HX711_SCK  GPIO_NUM_18
 #define STANDBY_WAKE_GPIO GPIO_NUM_6
 #define FLOW_OPTIMAL_MIN_GPS 3.0f
 #define FLOW_OPTIMAL_MAX_GPS 6.0f
@@ -122,7 +121,6 @@ static int32_t pending_weight_tenths = INT32_MIN;
 static int64_t pending_weight_since_us;
 static volatile bool scale_is_moving;
 static volatile float scale_flow_gps;
-static portMUX_TYPE hx711_mux = portMUX_INITIALIZER_UNLOCKED;
 static lv_timer_t *overlay_timer;
 static lv_obj_t *wifi_status_label, *wifi_network_list, *wifi_connect_button;
 static lv_obj_t *wifi_password_area;
@@ -359,97 +357,6 @@ static void format_fixed(char *buffer, size_t size, float value, uint32_t decima
 static lv_obj_t *make_panel(lv_obj_t *parent, lv_coord_t width, lv_coord_t height,
                             uint32_t color);
 
-static bool hx711_wait_ready(uint32_t timeout_ms)
-{
-    TickType_t start = xTaskGetTickCount();
-    TickType_t timeout = pdMS_TO_TICKS(timeout_ms);
-
-    while (gpio_get_level(HX711_DOUT)) {
-        if ((xTaskGetTickCount() - start) >= timeout) {
-            return false;
-        }
-        vTaskDelay(pdMS_TO_TICKS(1));
-    }
-    return true;
-}
-
-static bool hx711_read(int32_t *value)
-{
-    if (!hx711_wait_ready(250)) {
-        return false;
-    }
-
-    uint32_t data = 0;
-    portENTER_CRITICAL(&hx711_mux);
-    for (int bit = 0; bit < 24; ++bit) {
-        gpio_set_level(HX711_SCK, 1);
-        esp_rom_delay_us(1);
-        data = (data << 1) | (uint32_t)gpio_get_level(HX711_DOUT);
-        gpio_set_level(HX711_SCK, 0);
-        esp_rom_delay_us(1);
-    }
-
-    // 25th pulse selects channel A, gain 128, for the next conversion.
-    gpio_set_level(HX711_SCK, 1);
-    esp_rom_delay_us(1);
-    gpio_set_level(HX711_SCK, 0);
-    esp_rom_delay_us(1);
-    portEXIT_CRITICAL(&hx711_mux);
-
-    if (data & 0x00800000U) {
-        data |= 0xFF000000U;
-    }
-    *value = (int32_t)data;
-    return true;
-}
-
-static bool hx711_average(int32_t *average, int samples)
-{
-    int32_t readings[32];
-    int valid = 0;
-
-    /* Flush conversions captured before the user requested tare/calibration.
-     * Only subsequent fresh readings establish the new reference. */
-    for (int i = 0; i < 2; ++i) {
-        int32_t discarded;
-        if (!hx711_read(&discarded)) return false;
-    }
-
-    if (samples > (int)(sizeof(readings) / sizeof(readings[0]))) {
-        samples = sizeof(readings) / sizeof(readings[0]);
-    }
-
-    for (int i = 0; i < samples; ++i) {
-        int32_t reading;
-        if (hx711_read(&reading)) {
-            readings[valid++] = reading;
-        }
-        vTaskDelay(pdMS_TO_TICKS(5));
-    }
-
-    /* A timeout-heavy acquisition is not a reliable zero reference. */
-    if (valid < (samples * 3 + 3) / 4) {
-        return false;
-    }
-
-    /* A trimmed mean prevents one noisy HX711 conversion from shifting the
-     * zero point. With enough samples, discard the outer quarter at each end. */
-    for (int i = 1; i < valid; ++i) {
-        int32_t value = readings[i];
-        int j = i - 1;
-        while (j >= 0 && readings[j] > value) {
-            readings[j + 1] = readings[j];
-            --j;
-        }
-        readings[j + 1] = value;
-    }
-    int trim = valid >= 8 ? valid / 4 : 0;
-    int64_t total = 0;
-    for (int i = trim; i < valid - trim; ++i) total += readings[i];
-    *average = (int32_t)(total / (valid - trim * 2));
-    return true;
-}
-
 static int32_t median3(int32_t a, int32_t b, int32_t c)
 {
     if (a > b) { int32_t t = a; a = b; b = t; }
@@ -462,7 +369,7 @@ static void save_calibration_factor(void)
 {
     nvs_handle_t handle;
     if (nvs_open("pourbot", NVS_READWRITE, &handle) != ESP_OK) return;
-    if (nvs_set_blob(handle, "cal_factor", &calibration_factor,
+    if (nvs_set_blob(handle, "cal_nau", &calibration_factor,
                      sizeof(calibration_factor)) == ESP_OK) {
         nvs_commit(handle);
     }
@@ -474,7 +381,7 @@ static void load_calibration_factor(void)
     nvs_handle_t handle;
     size_t size = sizeof(calibration_factor);
     if (nvs_open("pourbot", NVS_READONLY, &handle) != ESP_OK) return;
-    if (nvs_get_blob(handle, "cal_factor", &calibration_factor, &size) != ESP_OK ||
+    if (nvs_get_blob(handle, "cal_nau", &calibration_factor, &size) != ESP_OK ||
         size != sizeof(calibration_factor)) {
         calibration_factor = 0.0f;
     }
@@ -929,9 +836,8 @@ static void standby_task(void *argument)
         bsp_display_backlight_off();
         bsp_display_panel_off();
 
-        /* HX711 power-down mode begins after PD_SCK stays high for >60 us. */
-        gpio_set_level(HX711_SCK, 1);
-        vTaskDelay(pdMS_TO_TICKS(20));
+        /* The NAU7802 drops from roughly 2 mA to about 200 nA here. */
+        nau7802_power_down();
 
         /* Do not enter sleep while the wake key is already held, otherwise
          * the level-triggered wake source would restart immediately. */
@@ -2417,7 +2323,7 @@ static void create_dashboard_screen(void)
 static void update_ui(bool connected, int32_t relative)
 {
     if (standby_active) return;
-    /* The HX711 task remains free to sample/filter at full speed. LVGL only
+    /* The NAU7802 task remains free to sample/filter at full speed. LVGL only
      * needs a new frame about every 33 ms; limiting redraw pressure leaves
      * enough CPU/DMA time for finger-tracked Tileview scrolling. */
     const int64_t draw_now_us = esp_timer_get_time();
@@ -2604,7 +2510,7 @@ static void scale_task(void *argument)
      * establishing zero. Keep this separate from the fast live-reading path. */
     for (int i = 0; !boot_scale_ready && i < 10; ++i) {
         int32_t discarded;
-        hx711_read(&discarded);
+        nau7802_read(&discarded);
         vTaskDelay(pdMS_TO_TICKS(10));
     }
     int32_t last_reading = 0;
@@ -2621,14 +2527,14 @@ static void scale_task(void *argument)
     int flow_index = 0;
 
     while (true) {
-        /* Never clock the HX711 after the standby task powers it down. */
+        /* Never access the NAU7802 after the standby task powers it down. */
         if (standby_active) {
             vTaskDelay(pdMS_TO_TICKS(20));
             continue;
         }
         if (calibration_tare_requested) {
             int32_t new_offset;
-            bool ok = hx711_average(&new_offset, 24);
+            bool ok = nau7802_average(&new_offset, 24);
             if (ok) {
                 tare_offset = new_offset;
                 stable_weight_tenths = 0;
@@ -2661,7 +2567,7 @@ static void scale_task(void *argument)
         }
         if (calibration_run_requested) {
             int32_t loaded_raw = tare_offset;
-            bool ok = hx711_average(&loaded_raw, 12);
+            bool ok = nau7802_average(&loaded_raw, 12);
             int32_t delta = loaded_raw - tare_offset;
             if (delta < 0) delta = -delta;
             ok = ok && delta > 100 && calibration_known_grams > 0;
@@ -2690,7 +2596,7 @@ static void scale_task(void *argument)
             int32_t new_offset;
             /* Shorter routine tare; retain fresh-conversion flushing and the
              * trimmed mean. Boot/calibration keep their longer acquisition. */
-            if (hx711_average(&new_offset, 16)) {
+            if (nau7802_average(&new_offset, 16)) {
                 tare_offset = new_offset;
                 stable_weight_tenths = 0;
                 filter_initialized = false;
@@ -2712,7 +2618,7 @@ static void scale_task(void *argument)
             }
         }
 
-        if (hx711_read(&last_reading)) {
+        if (nau7802_read(&last_reading)) {
             const int32_t raw_relative = last_reading - tare_offset;
             const int64_t now_us = esp_timer_get_time();
             if (!filter_initialized) {
@@ -2796,25 +2702,6 @@ void app_main(void)
     gpio_set_direction(EXAMPLE_PIN_NUM_QSPI_BL, GPIO_MODE_OUTPUT);
     gpio_set_level(EXAMPLE_PIN_NUM_QSPI_BL, 0);
 
-    gpio_config_t input_config = {
-        .pin_bit_mask = 1ULL << HX711_DOUT,
-        .mode = GPIO_MODE_INPUT,
-        .pull_up_en = GPIO_PULLUP_ENABLE,
-        .pull_down_en = GPIO_PULLDOWN_DISABLE,
-        .intr_type = GPIO_INTR_DISABLE,
-    };
-    ESP_ERROR_CHECK(gpio_config(&input_config));
-
-    gpio_config_t output_config = {
-        .pin_bit_mask = 1ULL << HX711_SCK,
-        .mode = GPIO_MODE_OUTPUT,
-        .pull_up_en = GPIO_PULLUP_DISABLE,
-        .pull_down_en = GPIO_PULLDOWN_DISABLE,
-        .intr_type = GPIO_INTR_DISABLE,
-    };
-    ESP_ERROR_CHECK(gpio_config(&output_config));
-    gpio_set_level(HX711_SCK, 0);
-
     gpio_config_t wake_button_config = {
         .pin_bit_mask = 1ULL << STANDBY_WAKE_GPIO,
         .mode = GPIO_MODE_INPUT,
@@ -2833,6 +2720,10 @@ void app_main(void)
     } else {
         ESP_LOGE(TAG, "Preference storage startup failed: %s",
                  esp_err_to_name(nvs_result));
+    }
+
+    if (!nau7802_init()) {
+        ESP_LOGE(TAG, "Scale unavailable: check NAU7802 wiring on GPIO7/GPIO15");
     }
 
     bsp_display_cfg_t display_config = {
@@ -2866,13 +2757,13 @@ void app_main(void)
     bool conversions_ready = true;
     for (int i = 0; i < 10; ++i) {
         int32_t discarded;
-        if (!hx711_read(&discarded)) {
+        if (!nau7802_read(&discarded)) {
             conversions_ready = false;
             break;
         }
     }
     int32_t boot_offset;
-    boot_scale_ready = conversions_ready && hx711_average(&boot_offset, 24);
+    boot_scale_ready = conversions_ready && nau7802_average(&boot_offset, 24);
     if (boot_scale_ready) {
         tare_offset = boot_offset;
         tare_requested = false;

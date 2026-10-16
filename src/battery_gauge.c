@@ -22,23 +22,8 @@ static esp_err_t read_register(uint8_t reg, uint8_t *data, size_t length)
 esp_err_t battery_gauge_init(void)
 {
     if (gauge_bus_ready) return ESP_OK;
-    if (!gauge_bus_ready) {
-        const i2c_config_t config = {
-            .mode = I2C_MODE_MASTER,
-            .sda_io_num = BATTERY_I2C_SDA,
-            .scl_io_num = BATTERY_I2C_SCL,
-            /* Adafruit #5580 supplies external pull-ups to its VIN (3.3 V). */
-            .sda_pullup_en = GPIO_PULLUP_DISABLE,
-            .scl_pullup_en = GPIO_PULLUP_DISABLE,
-            .master.clk_speed = 100000,
-        };
-        esp_err_t result = i2c_param_config(GAUGE_BUS, &config);
-        if (result != ESP_OK) return result;
-        result = i2c_driver_install(GAUGE_BUS, I2C_MODE_MASTER, 0, 0, 0);
-        /* This is a dedicated bus. INVALID_STATE means it was already installed
-         * by an earlier attempt, so it is safe to continue using it. */
-        if (result != ESP_OK && result != ESP_ERR_INVALID_STATE) return result;
-    }
+    /* nau7802_init installs shared controller 1 before worker tasks start.
+     * Reconfiguring that live bus here could interrupt a scale conversion. */
     uint8_t version[2];
     esp_err_t result = read_register(REG_VERSION, version, sizeof(version));
     if (result != ESP_OK) return result;
@@ -50,12 +35,10 @@ esp_err_t battery_gauge_init(void)
 
 esp_err_t battery_gauge_reconnect(void)
 {
-    if (gauge_bus_ready) {
-        esp_err_t result = i2c_driver_delete(GAUGE_BUS);
-        if (result != ESP_OK && result != ESP_ERR_INVALID_STATE) return result;
-        gauge_bus_ready = false;
-        vTaskDelay(pdMS_TO_TICKS(10));
-    }
+    /* Controller 1 is shared with the NAU7802. Never delete or reconfigure it
+     * just because the fuel gauge missed a read. Probe the gauge again while
+     * leaving the scale's bus operational. */
+    gauge_bus_ready = false;
     return battery_gauge_init();
 }
 
