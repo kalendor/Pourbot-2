@@ -2530,6 +2530,8 @@ static void scale_task(void *argument)
     int64_t moving_until_us = 0;
     int movement_votes = 0;
     int movement_direction = 0;
+    bool meaningful_load_seen = false;
+    int64_t return_to_zero_since_us = 0;
     float flow_samples[5] = {0};
     int flow_count = 0;
     int flow_index = 0;
@@ -2567,6 +2569,8 @@ static void scale_task(void *argument)
                 movement_votes = 0;
                 movement_direction = 0;
                 moving_until_us = 0;
+                meaningful_load_seen = false;
+                return_to_zero_since_us = 0;
             }
             calibration_tare_requested = false;
             if (bsp_display_lock(1000)) {
@@ -2628,6 +2632,8 @@ static void scale_task(void *argument)
                 movement_votes = 0;
                 movement_direction = 0;
                 moving_until_us = 0;
+                meaningful_load_seen = false;
+                return_to_zero_since_us = 0;
                 tare_requested = false;
                 boot_scale_ready = true;
                 ESP_LOGI(TAG, "Tare offset: %" PRId32, tare_offset);
@@ -2700,6 +2706,39 @@ static void scale_task(void *argument)
                     for (int i = 0; i < flow_count; ++i) total += flow_samples[i];
                     scale_flow_gps = total / (float)flow_count;
                     if (!scale_is_moving && scale_flow_gps < 0.5f) scale_flow_gps = 0.0f;
+                }
+
+                /* Correct the small residual offset that can remain after a
+                 * vessel is removed.  This is deliberately gated: first see
+                 * a real load, then wait for an idle, stationary reading near
+                 * zero.  It therefore cannot erase the first few grams of an
+                 * active pour or continuously chase normal load-cell noise. */
+                if (calibration_factor != 0.0f) {
+                    const float filtered_grams = (float)filtered_relative / calibration_factor;
+                    const float abs_filtered_grams = filtered_grams < 0.0f
+                        ? -filtered_grams : filtered_grams;
+                    if (abs_filtered_grams >= 5.0f) meaningful_load_seen = true;
+
+                    if (meaningful_load_seen && !brew_running && !scale_is_moving &&
+                        abs_filtered_grams <= 1.2f) {
+                        if (return_to_zero_since_us == 0) {
+                            return_to_zero_since_us = now_us;
+                        } else if (now_us - return_to_zero_since_us >= 900000) {
+                            const int32_t zero_correction = filtered_relative;
+                            tare_offset += zero_correction;
+                            filtered_relative = 0;
+                            for (int i = 0; i < 5; ++i) samples[i] -= zero_correction;
+                            stable_weight_tenths = 0;
+                            pending_weight_tenths = INT32_MIN;
+                            scale_flow_gps = 0.0f;
+                            meaningful_load_seen = false;
+                            return_to_zero_since_us = 0;
+                            ESP_LOGI(TAG, "Return-to-zero correction: %" PRId32,
+                                     zero_correction);
+                        }
+                    } else {
+                        return_to_zero_since_us = 0;
+                    }
                 }
                 last_sample_us = now_us;
             }
