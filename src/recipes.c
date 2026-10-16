@@ -4,11 +4,8 @@
 #include "nvs.h"
 
 static pourbot_recipe_t recipes[POURBOT_RECIPE_COUNT] = {
-    {"Kasuya 4:6 V60",     20, 150, 45, 45, 5},
-    {"Onyx V60",           20, 150, 30, 20, 5},
-    {"Chemex Classic",      30, 167, 30, 45, 3},
+    {"My Pour", 20, 150, 45, 30, 5},
 };
-static uint8_t active_index;
 
 uint16_t pourbot_recipe_target_g(const pourbot_recipe_t *recipe)
 {
@@ -20,24 +17,32 @@ void pourbot_recipes_load(void)
     nvs_handle_t handle;
     if (nvs_open("recipes", NVS_READONLY, &handle) != ESP_OK) return;
     size_t size = sizeof(recipes);
-    uint8_t selected = 0;
     pourbot_recipe_t stored[POURBOT_RECIPE_COUNT];
-    if (nvs_get_blob(handle, "presets_v2", stored, &size) == ESP_OK && size == sizeof(stored)) {
+    if (nvs_get_blob(handle, "custom_v1", stored, &size) == ESP_OK &&
+        size == sizeof(stored)) {
         memcpy(recipes, stored, sizeof(recipes));
-        nvs_get_u8(handle, "active_v2", &selected);
     } else {
-        /* Original four-preset layout: drop slot zero while preserving edits
-         * and the selected identity of the remaining three recipes. */
-        pourbot_recipe_t legacy[4];
-        size = sizeof(legacy);
-        if (nvs_get_blob(handle, "presets", legacy, &size) == ESP_OK && size == sizeof(legacy))
-            memcpy(recipes, &legacy[1], sizeof(recipes));
-        uint8_t previous = 0;
-        if (nvs_get_u8(handle, "active", &previous) == ESP_OK && previous > 0 && previous < 4)
-            selected = previous - 1;
-    }
-    if (selected < POURBOT_RECIPE_COUNT) {
-        active_index = selected;
+        /* Migrate the selected recipe from the previous three-slot builder. */
+        pourbot_recipe_t legacy_three[3];
+        uint8_t selected = 0;
+        size = sizeof(legacy_three);
+        if (nvs_get_blob(handle, "presets_v2", legacy_three, &size) == ESP_OK &&
+            size == sizeof(legacy_three)) {
+            nvs_get_u8(handle, "active_v2", &selected);
+            if (selected >= 3) selected = 0;
+            recipes[0] = legacy_three[selected];
+        } else {
+            /* Also retain compatibility with the original four presets. */
+            pourbot_recipe_t legacy_four[4];
+            uint8_t previous = 0;
+            size = sizeof(legacy_four);
+            if (nvs_get_blob(handle, "presets", legacy_four, &size) == ESP_OK &&
+                size == sizeof(legacy_four)) {
+                nvs_get_u8(handle, "active", &previous);
+                if (previous >= 4) previous = 0;
+                recipes[0] = legacy_four[previous];
+            }
+        }
     }
     nvs_close(handle);
 }
@@ -46,8 +51,7 @@ static void persist(void)
 {
     nvs_handle_t handle;
     if (nvs_open("recipes", NVS_READWRITE, &handle) != ESP_OK) return;
-    nvs_set_blob(handle, "presets_v2", recipes, sizeof(recipes));
-    nvs_set_u8(handle, "active_v2", active_index);
+    nvs_set_blob(handle, "custom_v1", recipes, sizeof(recipes));
     nvs_commit(handle);
     nvs_close(handle);
 }
@@ -57,14 +61,13 @@ const pourbot_recipe_t *pourbot_recipe_get(uint8_t index)
     return index < POURBOT_RECIPE_COUNT ? &recipes[index] : &recipes[0];
 }
 
-const pourbot_recipe_t *pourbot_recipe_active(void) { return &recipes[active_index]; }
-uint8_t pourbot_recipe_active_index(void) { return active_index; }
+const pourbot_recipe_t *pourbot_recipe_active(void) { return &recipes[0]; }
+uint8_t pourbot_recipe_active_index(void) { return 0; }
 
 void pourbot_recipe_save_and_select(uint8_t index, const pourbot_recipe_t *recipe)
 {
     if (index >= POURBOT_RECIPE_COUNT || !recipe) return;
     recipes[index] = *recipe;
     recipes[index].name[sizeof(recipes[index].name) - 1] = 0;
-    active_index = index;
     persist();
 }

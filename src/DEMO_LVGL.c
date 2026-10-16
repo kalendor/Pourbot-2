@@ -88,7 +88,12 @@ static lv_obj_t *main_dose_card;
 static lv_obj_t *main_target_card;
 static lv_obj_t *main_weight_group;
 static lv_obj_t *main_brew_button;
-static lv_obj_t *recipe_edit_values[4];
+static lv_obj_t *recipe_edit_values[5];
+static lv_obj_t *recipe_name_value;
+static lv_obj_t *recipe_overview_label;
+static lv_obj_t *recipe_input_overlay;
+static lv_obj_t *recipe_input_area;
+static uint8_t recipe_input_field;
 static lv_obj_t *menu_overlay;
 static lv_obj_t *calibration_status_label;
 static lv_obj_t *calibration_weight_button;
@@ -784,6 +789,14 @@ static void brew_event_cb(lv_event_t *event)
 static void close_overlay(void)
 {
     if (overlay_timer) { lv_timer_del(overlay_timer); overlay_timer = NULL; }
+    if (recipe_input_overlay) {
+        lv_obj_del(recipe_input_overlay);
+        recipe_input_overlay = NULL;
+        recipe_input_area = NULL;
+    }
+    memset(recipe_edit_values, 0, sizeof(recipe_edit_values));
+    recipe_name_value = NULL;
+    recipe_overview_label = NULL;
     wifi_status_label = NULL;
     wifi_network_list = NULL;
     wifi_password_area = NULL;
@@ -1580,39 +1593,129 @@ static void recipes_event_cb(lv_event_t *event);
 static void recipe_refresh_values(void)
 {
     if (!recipe_edit_values[0]) return;
+    if (recipe_name_value) lv_label_set_text(recipe_name_value, recipe_edit.name);
     lv_label_set_text_fmt(recipe_edit_values[0], "%u g", recipe_edit.dose_g);
     lv_label_set_text_fmt(recipe_edit_values[1], "1:%u.%u",
                           recipe_edit.ratio_x10 / 10, recipe_edit.ratio_x10 % 10);
-    lv_label_set_text_fmt(recipe_edit_values[2], "%u sec", recipe_edit.bloom_hold_s);
-    lv_label_set_text_fmt(recipe_edit_values[3], "%u sec", recipe_edit.pour_hold_s);
-}
+    lv_label_set_text_fmt(recipe_edit_values[2], "%u s", recipe_edit.bloom_hold_s);
+    lv_label_set_text_fmt(recipe_edit_values[3], "%u s", recipe_edit.pour_hold_s);
+    lv_label_set_text_fmt(recipe_edit_values[4], "%u", recipe_edit.pour_count);
 
-static void recipe_adjust(uint8_t field, int direction)
-{
-    if (field == 0) {
-        int value = recipe_edit.dose_g + direction;
-        recipe_edit.dose_g = value < 5 ? 5 : (value > 100 ? 100 : value);
-    } else if (field == 1) {
-        int value = recipe_edit.ratio_x10 + direction;
-        recipe_edit.ratio_x10 = value < 100 ? 100 : (value > 250 ? 250 : value);
-    } else if (field == 2) {
-        int value = recipe_edit.bloom_hold_s + direction * 5;
-        recipe_edit.bloom_hold_s = value < 0 ? 0 : (value > 180 ? 180 : value);
-    } else {
-        int value = recipe_edit.pour_hold_s + direction * 5;
-        recipe_edit.pour_hold_s = value < 0 ? 0 : (value > 180 ? 180 : value);
+    if (recipe_overview_label) {
+        const uint16_t target = pourbot_recipe_target_g(&recipe_edit);
+        uint16_t bloom = (uint16_t)(recipe_edit.dose_g * 2U);
+        if (bloom > target) bloom = target;
+        const uint8_t later_pours = recipe_edit.pour_count > 1
+            ? recipe_edit.pour_count - 1 : 0;
+        const uint16_t each = later_pours
+            ? (uint16_t)((target - bloom + later_pours / 2) / later_pours) : 0;
+        lv_label_set_text_fmt(recipe_overview_label,
+            "#F2B94F %u g#\nTARGET\n\n%u POURS\n%u g BLOOM\n%u x ~%u g\n\n%u s + %u s HOLDS",
+            target, recipe_edit.pour_count, bloom, later_pours, each,
+            recipe_edit.bloom_hold_s, recipe_edit.pour_hold_s);
     }
-    recipe_refresh_values();
 }
 
-static void recipe_minus_event_cb(lv_event_t *event)
+static void recipe_input_close(void)
 {
-    recipe_adjust((uint8_t)(uintptr_t)lv_event_get_user_data(event), -1);
+    if (recipe_input_overlay) lv_obj_del(recipe_input_overlay);
+    recipe_input_overlay = NULL;
+    recipe_input_area = NULL;
 }
 
-static void recipe_plus_event_cb(lv_event_t *event)
+static void recipe_input_event_cb(lv_event_t *event)
 {
-    recipe_adjust((uint8_t)(uintptr_t)lv_event_get_user_data(event), 1);
+    const lv_event_code_t code = lv_event_get_code(event);
+    if (code == LV_EVENT_READY && recipe_input_area) {
+        const char *text = lv_textarea_get_text(recipe_input_area);
+        if (recipe_input_field == 0) {
+            if (text[0]) {
+                strncpy(recipe_edit.name, text, sizeof(recipe_edit.name) - 1);
+                recipe_edit.name[sizeof(recipe_edit.name) - 1] = 0;
+            }
+        } else if (recipe_input_field == 2) {
+            float ratio = strtof(text, NULL);
+            if (ratio < 10.0f) ratio = 10.0f;
+            if (ratio > 25.0f) ratio = 25.0f;
+            recipe_edit.ratio_x10 = (uint16_t)(ratio * 10.0f + 0.5f);
+        } else {
+            long value = strtol(text, NULL, 10);
+            if (recipe_input_field == 1) {
+                if (value < 5) value = 5;
+                if (value > 100) value = 100;
+                recipe_edit.dose_g = (uint16_t)value;
+            } else if (recipe_input_field == 3) {
+                if (value < 0) value = 0;
+                if (value > 180) value = 180;
+                recipe_edit.bloom_hold_s = (uint16_t)value;
+            } else if (recipe_input_field == 4) {
+                if (value < 0) value = 0;
+                if (value > 180) value = 180;
+                recipe_edit.pour_hold_s = (uint16_t)value;
+            } else if (recipe_input_field == 5) {
+                if (value < 2) value = 2;
+                if (value > 8) value = 8;
+                recipe_edit.pour_count = (uint8_t)value;
+            }
+        }
+        recipe_input_close();
+        recipe_refresh_values();
+    } else if (code == LV_EVENT_CANCEL) {
+        recipe_input_close();
+    }
+}
+
+static void recipe_field_event_cb(lv_event_t *event)
+{
+    recipe_input_field = (uint8_t)(uintptr_t)lv_event_get_user_data(event);
+    static const char *titles[] = {
+        "RECIPE NAME", "DOSE (5-100 g)", "RATIO (10.0-25.0)",
+        "BLOOM HOLD (0-180 s)", "BETWEEN POURS (0-180 s)",
+        "TOTAL POURS (2-8)"
+    };
+    char current[24];
+    if (recipe_input_field == 0) snprintf(current, sizeof(current), "%s", recipe_edit.name);
+    else if (recipe_input_field == 1) snprintf(current, sizeof(current), "%u", recipe_edit.dose_g);
+    else if (recipe_input_field == 2) snprintf(current, sizeof(current), "%u.%u",
+        recipe_edit.ratio_x10 / 10, recipe_edit.ratio_x10 % 10);
+    else if (recipe_input_field == 3) snprintf(current, sizeof(current), "%u", recipe_edit.bloom_hold_s);
+    else if (recipe_input_field == 4) snprintf(current, sizeof(current), "%u", recipe_edit.pour_hold_s);
+    else snprintf(current, sizeof(current), "%u", recipe_edit.pour_count);
+
+    recipe_input_overlay = lv_obj_create(lv_layer_top());
+    lv_obj_set_size(recipe_input_overlay, 480, 320);
+    lv_obj_set_style_bg_color(recipe_input_overlay, lv_color_hex(0x020305), 0);
+    lv_obj_set_style_bg_opa(recipe_input_overlay, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(recipe_input_overlay, 0, 0);
+    lv_obj_set_style_radius(recipe_input_overlay, 0, 0);
+    lv_obj_set_style_pad_all(recipe_input_overlay, 12, 0);
+    lv_obj_clear_flag(recipe_input_overlay, LV_OBJ_FLAG_SCROLLABLE);
+
+    lv_obj_t *title = lv_label_create(recipe_input_overlay);
+    lv_label_set_text(title, titles[recipe_input_field]);
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(title, lv_color_hex(0xF2B94F), 0);
+    lv_obj_align(title, LV_ALIGN_TOP_LEFT, 8, 2);
+
+    recipe_input_area = lv_textarea_create(recipe_input_overlay);
+    lv_obj_set_size(recipe_input_area, 440, 48);
+    lv_obj_align(recipe_input_area, LV_ALIGN_TOP_MID, 0, 27);
+    lv_textarea_set_one_line(recipe_input_area, true);
+    lv_textarea_set_max_length(recipe_input_area,
+                               recipe_input_field == 0 ? 23 : 5);
+    if (recipe_input_field != 0)
+        lv_textarea_set_accepted_chars(recipe_input_area,
+            recipe_input_field == 2 ? "0123456789." : "0123456789");
+    lv_textarea_set_text(recipe_input_area, current);
+    lv_obj_set_style_text_font(recipe_input_area, &lv_font_montserrat_20, 0);
+
+    lv_obj_t *keyboard = lv_keyboard_create(recipe_input_overlay);
+    lv_obj_set_size(keyboard, 456, 220);
+    lv_obj_align(keyboard, LV_ALIGN_BOTTOM_MID, 0, 0);
+    if (recipe_input_field != 0) lv_keyboard_set_mode(keyboard, LV_KEYBOARD_MODE_NUMBER);
+    lv_keyboard_set_textarea(keyboard, recipe_input_area);
+    lv_obj_add_event_cb(keyboard, recipe_input_event_cb, LV_EVENT_READY, NULL);
+    lv_obj_add_event_cb(keyboard, recipe_input_event_cb, LV_EVENT_CANCEL, NULL);
 }
 
 static void recipe_save_event_cb(lv_event_t *event)
@@ -1634,115 +1737,112 @@ static void recipe_save_event_cb(lv_event_t *event)
     memset(recipe_edit_values, 0, sizeof(recipe_edit_values));
 }
 
-static void recipe_editor_event_cb(lv_event_t *event)
-{
-    recipe_edit_index = (uint8_t)(uintptr_t)lv_event_get_user_data(event);
-    recipe_edit = *pourbot_recipe_get(recipe_edit_index);
-    close_overlay();
-    menu_overlay = lv_obj_create(lv_layer_top());
-    lv_obj_set_size(menu_overlay, 480, 320);
-    lv_obj_set_style_bg_color(menu_overlay, lv_color_hex(0x020305), 0);
-    lv_obj_set_style_bg_opa(menu_overlay, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_width(menu_overlay, 0, 0);
-    lv_obj_clear_flag(menu_overlay, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_t *title = lv_label_create(menu_overlay);
-    lv_label_set_text(title, recipe_edit.name);
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_18, 0);
-    lv_obj_set_style_text_color(title, lv_color_hex(0xF8FAFC), 0);
-    lv_obj_align(title, LV_ALIGN_TOP_LEFT, 16, 15);
-    small_action_button(menu_overlay, "BACK", 386, 8, 78, 0x1F2937,
-                        recipes_event_cb);
-
-    const char *names[] = {"DOSE", "RATIO", "BLOOM HOLD", "BETWEEN POURS"};
-    for (uint8_t i = 0; i < 4; ++i) {
-        lv_coord_t x = (i & 1) ? 246 : 16;
-        lv_coord_t y = (i < 2) ? 62 : 142;
-        lv_obj_t *panel = make_panel(menu_overlay, 218, 66, 0x080B10);
-        lv_obj_align(panel, LV_ALIGN_TOP_LEFT, x, y);
-        lv_obj_set_style_border_width(panel, 1, 0);
-        lv_obj_set_style_border_color(panel, lv_color_hex(0x1F2937), 0);
-        lv_obj_t *label = lv_label_create(panel);
-        lv_label_set_text(label, names[i]);
-        lv_obj_set_style_text_font(label, &lv_font_montserrat_10, 0);
-        lv_obj_set_style_text_color(label, lv_color_hex(0x94A3B8), 0);
-        lv_obj_align(label, LV_ALIGN_TOP_LEFT, 10, 6);
-        lv_obj_t *minus = lv_btn_create(panel);
-        lv_obj_set_size(minus, 42, 34); lv_obj_align(minus, LV_ALIGN_BOTTOM_LEFT, 7, -5);
-        lv_obj_set_style_bg_color(minus, lv_color_hex(0x1F2937), 0);
-        lv_obj_add_event_cb(minus, recipe_minus_event_cb, LV_EVENT_PRESSED,
-                            (void *)(uintptr_t)i);
-        lv_obj_add_event_cb(minus, recipe_minus_event_cb, LV_EVENT_LONG_PRESSED_REPEAT,
-                            (void *)(uintptr_t)i);
-        lv_obj_t *ml = lv_label_create(minus); lv_label_set_text(ml, "-"); lv_obj_center(ml);
-        recipe_edit_values[i] = lv_label_create(panel);
-        lv_obj_set_width(recipe_edit_values[i], 105);
-        lv_obj_set_style_text_align(recipe_edit_values[i], LV_TEXT_ALIGN_CENTER, 0);
-        lv_obj_set_style_text_font(recipe_edit_values[i], &lv_font_montserrat_18, 0);
-        lv_obj_set_style_text_color(recipe_edit_values[i], lv_color_hex(0xFFFFFF), 0);
-        lv_obj_align(recipe_edit_values[i], LV_ALIGN_BOTTOM_MID, 0, -12);
-        lv_obj_t *plus = lv_btn_create(panel);
-        lv_obj_set_size(plus, 42, 34); lv_obj_align(plus, LV_ALIGN_BOTTOM_RIGHT, -7, -5);
-        lv_obj_set_style_bg_color(plus, lv_color_hex(0x1F2937), 0);
-        lv_obj_add_event_cb(plus, recipe_plus_event_cb, LV_EVENT_PRESSED,
-                            (void *)(uintptr_t)i);
-        lv_obj_add_event_cb(plus, recipe_plus_event_cb, LV_EVENT_LONG_PRESSED_REPEAT,
-                            (void *)(uintptr_t)i);
-        lv_obj_t *pl = lv_label_create(plus); lv_label_set_text(pl, "+"); lv_obj_center(pl);
-    }
-    recipe_refresh_values();
-    lv_obj_t *hint = lv_label_create(menu_overlay);
-    lv_label_set_text_fmt(hint, "%u pours  |  New target: %u g",
-                          recipe_edit.pour_count, pourbot_recipe_target_g(&recipe_edit));
-    lv_obj_set_style_text_color(hint, lv_color_hex(0x94A3B8), 0);
-    lv_obj_align(hint, LV_ALIGN_TOP_LEFT, 18, 229);
-    lv_obj_t *save_button = small_action_button(menu_overlay, "SAVE & USE",
-                                                278, 245, 186, 0xB7791F,
-                                                recipe_save_event_cb);
-    /* Keep the visual layout compact, but make edge touches much more forgiving. */
-    lv_obj_set_ext_click_area(save_button, 18);
-}
-
 static void recipes_event_cb(lv_event_t *event)
 {
     (void)event;
+    recipe_edit_index = pourbot_recipe_active_index();
+    recipe_edit = *pourbot_recipe_active();
     close_overlay();
     memset(recipe_edit_values, 0, sizeof(recipe_edit_values));
+    recipe_name_value = NULL;
+    recipe_overview_label = NULL;
+    recipe_input_overlay = NULL;
+    recipe_input_area = NULL;
     menu_overlay = lv_obj_create(lv_layer_top());
     lv_obj_set_size(menu_overlay, 480, 320);
-    lv_obj_set_style_bg_color(menu_overlay, lv_color_hex(0x020305), 0);
+    lv_obj_set_style_bg_color(menu_overlay, lv_color_hex(0x030609), 0);
     lv_obj_set_style_bg_opa(menu_overlay, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(menu_overlay, 0, 0);
+    lv_obj_set_style_pad_all(menu_overlay, 0, 0);
     lv_obj_clear_flag(menu_overlay, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_t *title = lv_label_create(menu_overlay);
-    lv_label_set_text(title, "POUR-OVER RECIPES");
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_18, 0);
+    lv_label_set_text(title, "RECIPE BUILDER");
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_20, 0);
     lv_obj_set_style_text_color(title, lv_color_hex(0xF8FAFC), 0);
-    lv_obj_align(title, LV_ALIGN_TOP_LEFT, 16, 14);
+    lv_obj_align(title, LV_ALIGN_TOP_LEFT, 16, 13);
+    lv_obj_t *subtitle = lv_label_create(menu_overlay);
+    lv_label_set_text(subtitle, "Build your perfect pour");
+    lv_obj_set_style_text_font(subtitle, &lv_font_montserrat_10, 0);
+    lv_obj_set_style_text_color(subtitle, lv_color_hex(0x7F929E), 0);
+    lv_obj_align(subtitle, LV_ALIGN_TOP_LEFT, 18, 37);
     small_action_button(menu_overlay, "BACK", 386, 8, 78, 0x1F2937,
                         close_overlay_event_cb);
-    for (uint8_t i = 0; i < POURBOT_RECIPE_COUNT; ++i) {
-        const pourbot_recipe_t *recipe = pourbot_recipe_get(i);
-        lv_obj_t *row = lv_btn_create(menu_overlay);
-        lv_obj_set_size(row, 448, 53);
-        lv_obj_align(row, LV_ALIGN_TOP_LEFT, 16, 57 + i * 60);
-        lv_obj_set_style_radius(row, 14, 0);
-        lv_obj_set_style_bg_color(row, lv_color_hex(i == pourbot_recipe_active_index() ? 0x2B2317 : 0x0B1017), 0);
-        lv_obj_set_style_border_width(row, 1, 0);
-        lv_obj_set_style_border_color(row, lv_color_hex(i == pourbot_recipe_active_index() ? 0xB7791F : 0x1F2937), 0);
-        lv_obj_add_event_cb(row, recipe_editor_event_cb, LV_EVENT_CLICKED, (void *)(uintptr_t)i);
-        lv_obj_t *name = lv_label_create(row);
-        lv_label_set_text(name, recipe->name);
-        lv_obj_set_style_text_font(name, &lv_font_montserrat_14, 0);
-        lv_obj_set_style_text_color(name, lv_color_hex(0xF8FAFC), 0);
-        lv_obj_align(name, LV_ALIGN_TOP_LEFT, 4, -2);
-        lv_obj_t *detail = lv_label_create(row);
-        lv_label_set_text_fmt(detail, "%ug  1:%u.%u  %ug target  Bloom %us  Hold %us",
-            recipe->dose_g, recipe->ratio_x10 / 10, recipe->ratio_x10 % 10,
-            pourbot_recipe_target_g(recipe), recipe->bloom_hold_s, recipe->pour_hold_s);
-        lv_obj_set_style_text_font(detail, &lv_font_montserrat_10, 0);
-        lv_obj_set_style_text_color(detail, lv_color_hex(0xF8FAFC), 0);
-        lv_obj_align(detail, LV_ALIGN_BOTTOM_LEFT, 4, 2);
+
+    lv_obj_t *name_card = lv_btn_create(menu_overlay);
+    lv_obj_set_size(name_card, 278, 50);
+    lv_obj_align(name_card, LV_ALIGN_TOP_LEFT, 16, 57);
+    lv_obj_set_style_radius(name_card, 12, 0);
+    lv_obj_set_style_bg_color(name_card, lv_color_hex(0x0B1117), 0);
+    lv_obj_set_style_bg_color(name_card, lv_color_hex(0x18232C), LV_STATE_PRESSED);
+    lv_obj_set_style_border_width(name_card, 1, 0);
+    lv_obj_set_style_border_color(name_card, lv_color_hex(0x263742), 0);
+    lv_obj_set_style_shadow_width(name_card, 0, 0);
+    lv_obj_add_event_cb(name_card, recipe_field_event_cb, LV_EVENT_CLICKED,
+                        (void *)(uintptr_t)0);
+    lv_obj_set_ext_click_area(name_card, 5);
+    lv_obj_t *name_title = lv_label_create(name_card);
+    lv_label_set_text(name_title, "RECIPE NAME");
+    lv_obj_set_style_text_font(name_title, &lv_font_montserrat_10, 0);
+    lv_obj_set_style_text_color(name_title, lv_color_hex(0x7F929E), 0);
+    lv_obj_align(name_title, LV_ALIGN_TOP_LEFT, 0, -5);
+    recipe_name_value = lv_label_create(name_card);
+    lv_obj_set_width(recipe_name_value, 245);
+    lv_label_set_long_mode(recipe_name_value, LV_LABEL_LONG_DOT);
+    lv_obj_set_style_text_font(recipe_name_value, &lv_font_montserrat_16, 0);
+    lv_obj_set_style_text_color(recipe_name_value, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_align(recipe_name_value, LV_ALIGN_BOTTOM_LEFT, 0, 5);
+
+    const char *field_names[] = {"DOSE", "RATIO", "BLOOM HOLD", "POUR PAUSE", "TOTAL POURS"};
+    for (uint8_t i = 0; i < 5; ++i) {
+        const lv_coord_t x = (i & 1) ? 158 : 16;
+        const lv_coord_t y = 115 + (i / 2) * 61;
+        const lv_coord_t width = i == 4 ? 278 : 136;
+        lv_obj_t *field = lv_btn_create(menu_overlay);
+        lv_obj_set_size(field, width, 53);
+        lv_obj_align(field, LV_ALIGN_TOP_LEFT, x, y);
+        lv_obj_set_style_radius(field, 12, 0);
+        lv_obj_set_style_bg_color(field, lv_color_hex(0x091016), 0);
+        lv_obj_set_style_bg_color(field, lv_color_hex(0x18232C), LV_STATE_PRESSED);
+        lv_obj_set_style_border_width(field, 1, 0);
+        lv_obj_set_style_border_color(field, lv_color_hex(0x1D303B), 0);
+        lv_obj_set_style_shadow_width(field, 0, 0);
+        lv_obj_add_event_cb(field, recipe_field_event_cb, LV_EVENT_CLICKED,
+                            (void *)(uintptr_t)(i + 1));
+        lv_obj_set_ext_click_area(field, 4);
+        lv_obj_t *field_title = lv_label_create(field);
+        lv_label_set_text(field_title, field_names[i]);
+        lv_obj_set_style_text_font(field_title, &lv_font_montserrat_10, 0);
+        lv_obj_set_style_text_color(field_title, lv_color_hex(0x7F929E), 0);
+        lv_obj_align(field_title, LV_ALIGN_TOP_LEFT, 0, -5);
+        recipe_edit_values[i] = lv_label_create(field);
+        lv_obj_set_style_text_font(recipe_edit_values[i], &lv_font_montserrat_18, 0);
+        lv_obj_set_style_text_color(recipe_edit_values[i], lv_color_hex(0xFFFFFF), 0);
+        lv_obj_align(recipe_edit_values[i], LV_ALIGN_BOTTOM_LEFT, 0, 5);
     }
+
+    lv_obj_t *overview = make_panel(menu_overlay, 154, 184, 0x081016);
+    lv_obj_align(overview, LV_ALIGN_TOP_LEFT, 310, 57);
+    lv_obj_set_style_border_width(overview, 1, 0);
+    lv_obj_set_style_border_color(overview, lv_color_hex(0x75551F), 0);
+    lv_obj_t *overview_title = lv_label_create(overview);
+    lv_label_set_text(overview_title, "OVERVIEW");
+    lv_obj_set_style_text_font(overview_title, &lv_font_montserrat_12, 0);
+    lv_obj_set_style_text_color(overview_title, lv_color_hex(0xF2B94F), 0);
+    lv_obj_align(overview_title, LV_ALIGN_TOP_LEFT, 3, 1);
+    recipe_overview_label = lv_label_create(overview);
+    lv_obj_set_width(recipe_overview_label, 132);
+    lv_label_set_recolor(recipe_overview_label, true);
+    lv_obj_set_style_text_font(recipe_overview_label, &lv_font_montserrat_10, 0);
+    lv_obj_set_style_text_color(recipe_overview_label, lv_color_hex(0xDCE5EA), 0);
+    lv_obj_set_style_text_line_space(recipe_overview_label, 2, 0);
+    lv_obj_align(recipe_overview_label, LV_ALIGN_TOP_LEFT, 3, 23);
+
+    lv_obj_t *save_button = small_action_button(menu_overlay, "SAVE & USE",
+                                                310, 251, 154, 0xB7791F,
+                                                recipe_save_event_cb);
+    lv_obj_set_height(save_button, 53);
+    lv_obj_set_ext_click_area(save_button, 10);
+    recipe_refresh_values();
 }
 
 static void menu_event_cb(lv_event_t *event)
