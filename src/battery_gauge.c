@@ -91,7 +91,10 @@ esp_err_t battery_gauge_read(battery_gauge_sample_t *sample)
     sample->percent = rounded > 100 ? 100 : (uint8_t)rounded;
     sample->millivolts = (uint16_t)mv;
     sample->rate_tenths_per_hour = (int16_t)(((int32_t)rate * 208) / 100);
-    /* Ignore tiny positive CRATE noise; 1.0%/hour is clear charging activity. */
-    sample->charging = sample->rate_tenths_per_hour >= 10;
+    /* Match the reference MAX17048 drivers: CRATE is signed, so any positive
+     * rate means the cell is gaining charge.  The task-level vote filter
+     * suppresses a single noisy sample without hiding the 0.208%/h minimum
+     * positive step near the end of a charge. */
+    sample->charging = rate > 0;
     return ESP_OK;
 }

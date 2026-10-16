@@ -224,7 +224,6 @@ static void battery_task(void *argument)
     unsigned consecutive_read_failures = 0;
     unsigned charging_votes = 0;
     unsigned not_charging_votes = 0;
-    uint16_t previous_mv = 0;
     while (!standby_active) {
         battery_gauge_sample_t sample;
         /* I2C never runs in the scale task or while holding the LVGL mutex. */
@@ -244,7 +243,6 @@ static void battery_task(void *argument)
                 consecutive_read_failures = 0;
                 charging_votes = 0;
                 not_charging_votes = 0;
-                previous_mv = 0;
             }
         } else if (!gauge_online) {
             ESP_LOGI(TAG, "MAX17048 detected: %u%%, %u mV", sample.percent,
@@ -265,23 +263,17 @@ static void battery_task(void *argument)
              * best available signal. Two consecutive positive readings make
              * charging responsive even near full charge, where cell voltage
              * may no longer rise by the old 2 mV/10 s requirement. */
-            const bool voltage_falling = previous_mv != 0 &&
-                sample.millivolts + 3 < previous_mv;
-            if (sample.rate_tenths_per_hour >= 3 && !voltage_falling) {
+            if (sample.charging) {
                 if (charging_votes < 2) charging_votes++;
                 not_charging_votes = 0;
-            } else if (sample.rate_tenths_per_hour <= 0 || voltage_falling) {
+            } else {
                 if (not_charging_votes < 2) not_charging_votes++;
                 charging_votes = 0;
-            } else {
-                charging_votes = 0;
-                not_charging_votes = 0;
             }
             if (charging_votes >= 2) next_charging = true;
             if (not_charging_votes >= 2) {
                 next_charging = false;
             }
-            previous_mv = sample.millivolts;
         }
         /* Do not discard a good reading just because LVGL is busy during
          * startup. Wait for the UI lock; subsequent samples remain infrequent. */
