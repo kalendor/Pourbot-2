@@ -894,6 +894,14 @@ static void standby_task(void *argument)
             lv_indev_enable(touch, false);
             bsp_display_unlock();
         }
+
+        /* Ease the backlight down over half a second before cutting panel
+         * power.  The quadratic curve looks perceptually smoother than equal
+         * PWM steps, especially through the dim end of the transition. */
+        for (int step = 20; step >= 0; --step) {
+            bsp_display_brightness_set((step * step) / 4);
+            if (step > 0) vTaskDelay(pdMS_TO_TICKS(25));
+        }
         bsp_display_backlight_off();
         bsp_display_panel_off();
 
