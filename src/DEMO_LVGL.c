@@ -224,6 +224,9 @@ static void battery_task(void *argument)
     unsigned consecutive_read_failures = 0;
     unsigned charging_votes = 0;
     unsigned not_charging_votes = 0;
+    uint16_t previous_battery_mv = 0;
+    int64_t charging_evidence_until_us = 0;
+    bool charger_disconnect_seen = false;
     while (!standby_active) {
         battery_gauge_sample_t sample;
         /* I2C never runs in the scale task or while holding the LVGL mutex. */
@@ -243,6 +246,9 @@ static void battery_task(void *argument)
                 consecutive_read_failures = 0;
                 charging_votes = 0;
                 not_charging_votes = 0;
+                previous_battery_mv = 0;
+                charging_evidence_until_us = 0;
+                charger_disconnect_seen = false;
             }
         } else if (!gauge_online) {
             ESP_LOGI(TAG, "MAX17048 detected: %u%%, %u mV", sample.percent,
@@ -259,21 +265,43 @@ static void battery_task(void *argument)
             charging_votes = 0;
             not_charging_votes = 0;
         } else {
-            /* MAX17048 has no charger-present pin.  Its CRATE value is the
-             * best available signal. Two consecutive positive readings make
-             * charging responsive even near full charge, where cell voltage
-             * may no longer rise by the old 2 mV/10 s requirement. */
-            if (sample.charging) {
+            const int64_t now_us = esp_timer_get_time();
+            const bool voltage_rising = previous_battery_mv != 0 &&
+                sample.millivolts >= previous_battery_mv + 3;
+            const bool voltage_falling = previous_battery_mv != 0 &&
+                sample.millivolts + 3 <= previous_battery_mv;
+
+            /* CRATE can lag after USB is unplugged and immediately replugged.
+             * A 3 mV upward cell step is independent evidence that charging
+             * resumed; latch it briefly while ModelGauge catches up. */
+            if (voltage_falling) {
+                charger_disconnect_seen = charger_disconnect_seen || next_charging;
+                next_charging = false;
+                charging_evidence_until_us = 0;
+                charging_votes = 0;
+                not_charging_votes = 0;
+            } else if (voltage_rising && charger_disconnect_seen) {
+                next_charging = true;
+                charging_evidence_until_us = now_us + 30000000;
+                charger_disconnect_seen = false;
+                charging_votes = 0;
+                not_charging_votes = 0;
+            } else if (sample.charging) {
                 if (charging_votes < 2) charging_votes++;
+                not_charging_votes = 0;
+                if (charging_votes >= 2) {
+                    next_charging = true;
+                    charging_evidence_until_us = now_us + 10000000;
+                }
+            } else if (now_us < charging_evidence_until_us) {
+                charging_votes = 0;
                 not_charging_votes = 0;
             } else {
                 if (not_charging_votes < 2) not_charging_votes++;
                 charging_votes = 0;
+                if (not_charging_votes >= 2) next_charging = false;
             }
-            if (charging_votes >= 2) next_charging = true;
-            if (not_charging_votes >= 2) {
-                next_charging = false;
-            }
+            previous_battery_mv = sample.millivolts;
         }
         /* Do not discard a good reading just because LVGL is busy during
          * startup. Wait for the UI lock; subsequent samples remain infrequent. */
