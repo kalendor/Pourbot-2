@@ -88,10 +88,13 @@ bool nau7802_init(void)
         bus_configured = true;
     }
 
-    uint8_t revision;
-    if (read_reg(REG_REVISION, &revision, 1) != ESP_OK ||
-        (revision & 0x0F) != 0x0F) {
-        ESP_LOGE(TAG, "NAU7802 not detected at address 0x2A");
+    /* Match the reference driver: device presence is an ACK at 0x2A. Do not
+     * reject a compatible board based on DEVICE_REV before reset/power-up. */
+    uint8_t pu_ctrl;
+    esp_err_t probe_result = read_reg(REG_PU_CTRL, &pu_ctrl, 1);
+    if (probe_result != ESP_OK) {
+        ESP_LOGE(TAG, "No I2C ACK from NAU7802 at 0x2A: %s (0x%x)",
+                 esp_err_to_name(probe_result), (unsigned)probe_result);
         return false;
     }
 
@@ -129,6 +132,11 @@ bool nau7802_init(void)
     if (read_reg(REG_CTRL2, &ctrl2, 1) != ESP_OK || (ctrl2 & (1U << 3))) {
         ESP_LOGE(TAG, "NAU7802 AFE calibration failed");
         return false;
+    }
+    uint8_t revision;
+    if (read_reg(REG_REVISION, &revision, 1) == ESP_OK &&
+        (revision & 0x0F) != 0x0F) {
+        ESP_LOGW(TAG, "Unexpected NAU7802 revision 0x%02X; continuing", revision);
     }
     initialized = true;
     ESP_LOGI(TAG, "NAU7802 ready at 80 SPS, gain 128");
