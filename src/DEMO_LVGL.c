@@ -155,6 +155,29 @@ static lv_obj_t *battery_labels[2];
 RTC_DATA_ATTR static int battery_percent = -1;
 static bool battery_charging;
 
+static void prime_battery_gauge(void)
+{
+    /* Read the gauge before worker tasks begin sharing the I2C bus.  This
+     * makes the first real UI frame start with a valid battery value instead
+     * of hoping that a background poll wins the bus shortly after boot. */
+    for (int attempt = 0; attempt < 8; ++attempt) {
+        battery_gauge_sample_t sample;
+        if (battery_gauge_init() == ESP_OK &&
+            battery_gauge_read(&sample) == ESP_OK) {
+            battery_percent = sample.percent;
+            battery_charging = false;
+            ESP_LOGI(TAG, "Boot battery: %u%%, %u mV, rate %d.%u%%/h",
+                     sample.percent, sample.millivolts,
+                     sample.rate_tenths_per_hour / 10,
+                     (unsigned)(sample.rate_tenths_per_hour < 0
+                         ? -sample.rate_tenths_per_hour : sample.rate_tenths_per_hour) % 10);
+            return;
+        }
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+    ESP_LOGW(TAG, "MAX17048 unavailable during boot; retaining last valid battery value");
+}
+
 static void render_battery_label(lv_obj_t *label)
 {
     if (!label) return;
@@ -199,9 +222,9 @@ static void battery_task(void *argument)
     }
     bool gauge_online = false;
     unsigned consecutive_read_failures = 0;
-    int64_t charge_window_started_us = 0;
-    uint16_t charge_window_start_mv = 0;
-    bool charge_rate_positive = true;
+    unsigned charging_votes = 0;
+    unsigned not_charging_votes = 0;
+    uint16_t previous_mv = 0;
     while (!standby_active) {
         battery_gauge_sample_t sample;
         /* I2C never runs in the scale task or while holding the LVGL mutex. */
@@ -219,7 +242,9 @@ static void battery_task(void *argument)
                          esp_err_to_name(reconnect_result),
                          (unsigned)reconnect_result);
                 consecutive_read_failures = 0;
-                charge_window_started_us = 0;
+                charging_votes = 0;
+                not_charging_votes = 0;
+                previous_mv = 0;
             }
         } else if (!gauge_online) {
             ESP_LOGI(TAG, "MAX17048 detected: %u%%, %u mV", sample.percent,
@@ -229,32 +254,34 @@ static void battery_task(void *argument)
         } else {
             consecutive_read_failures = 0;
         }
-        const int64_t now_us = esp_timer_get_time();
         bool next_charging = battery_charging;
         if (result != ESP_OK) {
-            next_charging = false;
-            charge_window_started_us = 0;
-        } else if (charge_window_started_us == 0) {
-            charge_window_started_us = now_us;
-            charge_window_start_mv = sample.millivolts;
-            charge_rate_positive = sample.rate_tenths_per_hour >= 10;
-            next_charging = false;
+            /* Preserve the last known state through a transient shared-bus
+             * miss, just as we preserve the last valid percentage. */
+            charging_votes = 0;
+            not_charging_votes = 0;
         } else {
-            charge_rate_positive = charge_rate_positive &&
-                sample.rate_tenths_per_hour >= 10;
-            /* CRATE alone can stay slightly positive after USB is removed.
-             * Only show charging after a full window also gains cell voltage. */
-            if (now_us - charge_window_started_us >= 10000000) {
-                const int voltage_change = (int)sample.millivolts -
-                    (int)charge_window_start_mv;
-                next_charging = charge_rate_positive && voltage_change >= 2;
-                charge_window_started_us = now_us;
-                charge_window_start_mv = sample.millivolts;
-                charge_rate_positive = sample.rate_tenths_per_hour >= 10;
-            } else if (sample.rate_tenths_per_hour <= 0 ||
-                       sample.millivolts + 2 < charge_window_start_mv) {
+            /* MAX17048 has no charger-present pin.  Its CRATE value is the
+             * best available signal. Two consecutive positive readings make
+             * charging responsive even near full charge, where cell voltage
+             * may no longer rise by the old 2 mV/10 s requirement. */
+            const bool voltage_falling = previous_mv != 0 &&
+                sample.millivolts + 3 < previous_mv;
+            if (sample.rate_tenths_per_hour >= 3 && !voltage_falling) {
+                if (charging_votes < 2) charging_votes++;
+                not_charging_votes = 0;
+            } else if (sample.rate_tenths_per_hour <= 0 || voltage_falling) {
+                if (not_charging_votes < 2) not_charging_votes++;
+                charging_votes = 0;
+            } else {
+                charging_votes = 0;
+                not_charging_votes = 0;
+            }
+            if (charging_votes >= 2) next_charging = true;
+            if (not_charging_votes >= 2) {
                 next_charging = false;
             }
+            previous_mv = sample.millivolts;
         }
         /* Do not discard a good reading just because LVGL is busy during
          * startup. Wait for the UI lock; subsequent samples remain infrequent. */
@@ -2796,6 +2823,7 @@ void app_main(void)
     if (!nau7802_init()) {
         ESP_LOGE(TAG, "Scale unavailable: check NAU7802 wiring on GPIO7/GPIO15");
     }
+    prime_battery_gauge();
 
     bsp_display_cfg_t display_config = {
         .lvgl_port_cfg = ESP_LVGL_PORT_INIT_CONFIG(),
