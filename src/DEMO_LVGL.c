@@ -2492,11 +2492,11 @@ static void create_dashboard_screen(void)
 static void update_ui(bool connected, int32_t relative)
 {
     if (standby_active) return;
-    /* The NAU7802 task remains free to sample/filter at full speed. LVGL only
-     * needs a new frame about every 33 ms; limiting redraw pressure leaves
-     * enough CPU/DMA time for finger-tracked Tileview scrolling. */
+    /* Scale values only need a 10 Hz visual refresh. Keeping the expensive
+     * LVGL update out of most conversion cycles lets the NAU7802 acquire and
+     * average substantially more samples; LVGL animations remain independent. */
     const int64_t draw_now_us = esp_timer_get_time();
-    if (draw_now_us - last_ui_draw_us < 33333) return;
+    if (draw_now_us - last_ui_draw_us < 100000) return;
     last_ui_draw_us = draw_now_us;
     if (!bsp_display_lock(1000)) {
         return;
@@ -2522,28 +2522,32 @@ static void update_ui(bool connected, int32_t relative)
             const float grams = (float)relative / calibration_factor;
             const int32_t measured_tenths = (int32_t)(grams >= 0.0f
                 ? grams * 10.0f + 0.5f : grams * 10.0f - 0.5f);
-            /* The stationary display hold must not latch a residual reading
-             * after unloading. Round stationary readings below 0.25 g to
-             * zero; release at 0.30 g to prevent zero chatter.
+            /* The measured empty-platform noise reaches about 0.3 g peak on
+             * this unit. Round stationary readings below 0.40 g to zero and
+             * release at 0.50 g to prevent zero chatter without altering the
+             * tare offset.
              * This changes display rounding only, never the tare offset. */
             const float abs_grams = grams < 0.0f ? -grams : grams;
             const int64_t output_now_us = esp_timer_get_time();
+            const int32_t display_delta_tenths = stable_weight_tenths == INT32_MIN
+                ? 0 : measured_tenths - stable_weight_tenths;
+            const int32_t abs_display_delta_tenths = display_delta_tenths < 0
+                ? -display_delta_tenths : display_delta_tenths;
             if (stable_weight_tenths == INT32_MIN || scale_is_moving) {
                 pending_weight_tenths = INT32_MIN;
             }
-            if ((!scale_is_moving && abs_grams < 0.25f) ||
-                (stable_weight_tenths == 0 && !scale_is_moving && abs_grams < 0.30f)) {
+            if ((!scale_is_moving && abs_grams < 0.40f) ||
+                (stable_weight_tenths == 0 && !scale_is_moving && abs_grams < 0.50f)) {
                 stable_weight_tenths = 0;
                 pending_weight_tenths = INT32_MIN;
             } else if (stable_weight_tenths == INT32_MIN || scale_is_moving ||
-                grams > ((float)stable_weight_tenths / 10.0f) + 0.50f ||
-                grams < ((float)stable_weight_tenths / 10.0f) - 0.50f) {
+                       abs_display_delta_tenths >= 5) {
                 stable_weight_tenths = measured_tenths;
                 pending_weight_tenths = INT32_MIN;
-            } else if (grams > ((float)stable_weight_tenths / 10.0f) + 0.10f ||
-                       grams < ((float)stable_weight_tenths / 10.0f) - 0.10f) {
-                /* Small stationary changes must persist, not be hidden by a
-                 * half-gram display latch. Movement still updates immediately. */
+            } else if (measured_tenths != stable_weight_tenths) {
+                /* Compare integer tenths instead of floating-point boundaries.
+                 * A true 100.0 reading can now advance a latched 99.9 after it
+                 * persists, while alternating noise is still rejected. */
                 if (pending_weight_tenths != measured_tenths) {
                     pending_weight_tenths = measured_tenths;
                     pending_weight_since_us = output_now_us;
