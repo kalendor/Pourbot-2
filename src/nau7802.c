@@ -166,13 +166,13 @@ bool nau7802_read(int32_t *value)
 
 bool nau7802_average(int32_t *average, int samples)
 {
-    int32_t readings[32];
+    int32_t readings[64];
     int valid = 0;
     for (int i = 0; i < 2; ++i) {
         int32_t discarded;
         if (!nau7802_read(&discarded)) return false;
     }
-    if (samples > 32) samples = 32;
+    if (samples > 64) samples = 64;
     for (int i = 0; i < samples; ++i) {
         int32_t reading;
         if (nau7802_read(&reading)) readings[valid++] = reading;
