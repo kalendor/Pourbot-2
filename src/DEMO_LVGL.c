@@ -2698,6 +2698,11 @@ static void scale_task(void *argument)
     int flow_index = 0;
     unsigned read_failures = 0;
     int64_t next_reconnect_us = 0;
+    int32_t diagnostic_min = INT32_MAX;
+    int32_t diagnostic_max = INT32_MIN;
+    int64_t diagnostic_total = 0;
+    uint32_t diagnostic_count = 0;
+    int64_t diagnostic_last_us = 0;
 
     while (true) {
         /* Never access the NAU7802 after the standby task powers it down. */
@@ -2827,6 +2832,10 @@ static void scale_task(void *argument)
             read_failures = 0;
             const int32_t raw_relative = last_reading - tare_offset;
             const int64_t now_us = esp_timer_get_time();
+            if (raw_relative < diagnostic_min) diagnostic_min = raw_relative;
+            if (raw_relative > diagnostic_max) diagnostic_max = raw_relative;
+            diagnostic_total += raw_relative;
+            diagnostic_count++;
             if (!filter_initialized) {
                 filtered_relative = raw_relative;
                 for (int i = 0; i < 5; ++i) samples[i] = raw_relative;
@@ -2926,6 +2935,29 @@ static void scale_task(void *argument)
                     }
                 }
                 last_sample_us = now_us;
+            }
+            if (diagnostic_count > 0 &&
+                (diagnostic_last_us == 0 || now_us - diagnostic_last_us >= 1000000)) {
+                const int32_t diagnostic_average =
+                    (int32_t)(diagnostic_total / (int64_t)diagnostic_count);
+                const float diagnostic_raw_g = calibration_factor != 0.0f
+                    ? (float)diagnostic_average / calibration_factor : 0.0f;
+                const float diagnostic_filtered_g = calibration_factor != 0.0f
+                    ? (float)filtered_relative / calibration_factor : 0.0f;
+                ESP_LOGW(TAG,
+                    "SCALE_DIAG n=%lu raw[min=%ld avg=%ld max=%ld span=%ld] raw_g=%.3f filtered_g=%.3f shown=%ld moving=%d factor=%.3f",
+                    (unsigned long)diagnostic_count, (long)diagnostic_min,
+                    (long)diagnostic_average, (long)diagnostic_max,
+                    (long)(diagnostic_max - diagnostic_min),
+                    (double)diagnostic_raw_g, (double)diagnostic_filtered_g,
+                    (long)(stable_weight_tenths == INT32_MIN ? INT32_MIN
+                                                             : stable_weight_tenths),
+                    scale_is_moving ? 1 : 0, (double)calibration_factor);
+                diagnostic_min = INT32_MAX;
+                diagnostic_max = INT32_MIN;
+                diagnostic_total = 0;
+                diagnostic_count = 0;
+                diagnostic_last_us = now_us;
             }
             update_ui(true, filtered_relative);
         } else {
