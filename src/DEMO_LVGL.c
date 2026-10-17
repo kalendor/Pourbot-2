@@ -2547,7 +2547,7 @@ static void update_ui(bool connected, int32_t relative)
                 if (pending_weight_tenths != measured_tenths) {
                     pending_weight_tenths = measured_tenths;
                     pending_weight_since_us = output_now_us;
-                } else if (output_now_us - pending_weight_since_us >= 250000) {
+                } else if (output_now_us - pending_weight_since_us >= 180000) {
                     stable_weight_tenths = measured_tenths;
                     pending_weight_tenths = INT32_MIN;
                 }
@@ -2685,6 +2685,9 @@ static void scale_task(void *argument)
     int32_t last_reading = 0;
     int32_t samples[5] = {0};
     int sample_index = 0;
+    int32_t settled_samples[16] = {0};
+    int settled_index = 0;
+    int settled_count = 0;
     int32_t filtered_relative = 0;
     bool filter_initialized = false;
     int64_t last_sample_us = 0;
@@ -2716,13 +2719,15 @@ static void scale_task(void *argument)
         }
         if (calibration_tare_requested) {
             int32_t new_offset;
-            bool ok = nau7802_average(&new_offset, 24);
+            bool ok = nau7802_average(&new_offset, 32);
             if (ok) {
                 tare_offset = new_offset;
                 stable_weight_tenths = 0;
                 filter_initialized = false;
                 pending_weight_tenths = INT32_MIN;
                 sample_index = 0;
+                settled_index = 0;
+                settled_count = 0;
                 flow_count = 0;
                 flow_index = 0;
                 scale_flow_gps = 0.0f;
@@ -2751,7 +2756,11 @@ static void scale_task(void *argument)
         }
         if (calibration_run_requested) {
             int32_t loaded_raw = tare_offset;
-            bool ok = nau7802_average(&loaded_raw, 12);
+            /* Let load-cell creep from placement decay, then use the largest
+             * trimmed sample set supported by the driver. This makes the
+             * saved span agree much more closely with the stable live path. */
+            vTaskDelay(pdMS_TO_TICKS(250));
+            bool ok = nau7802_average(&loaded_raw, 32);
             int32_t delta = loaded_raw - tare_offset;
             if (delta < 0) delta = -delta;
             ok = ok && delta > 100 && calibration_known_grams > 0;
@@ -2759,6 +2768,22 @@ static void scale_task(void *argument)
                 calibration_factor = (float)(loaded_raw - tare_offset) /
                                      (float)calibration_known_grams;
                 save_calibration_factor();
+                /* Start the live path from fresh post-calibration samples;
+                 * do not reinterpret an older filtered count with the new
+                 * span factor. */
+                stable_weight_tenths = INT32_MIN;
+                pending_weight_tenths = INT32_MIN;
+                filter_initialized = false;
+                sample_index = 0;
+                settled_index = 0;
+                settled_count = 0;
+                flow_count = 0;
+                flow_index = 0;
+                scale_flow_gps = 0.0f;
+                scale_is_moving = false;
+                movement_votes = 0;
+                movement_direction = 0;
+                moving_until_us = 0;
             }
             calibration_run_requested = false;
             if (bsp_display_lock(1000)) {
@@ -2786,6 +2811,8 @@ static void scale_task(void *argument)
                 filter_initialized = false;
                 pending_weight_tenths = INT32_MIN;
                 sample_index = 0;
+                settled_index = 0;
+                settled_count = 0;
                 flow_count = 0;
                 flow_index = 0;
                 scale_flow_gps = 0.0f;
@@ -2812,7 +2839,10 @@ static void scale_task(void *argument)
             if (!filter_initialized) {
                 filtered_relative = raw_relative;
                 for (int i = 0; i < 5; ++i) samples[i] = raw_relative;
+                for (int i = 0; i < 16; ++i) settled_samples[i] = raw_relative;
                 sample_index = 0;
+                settled_index = 0;
+                settled_count = 0;
                 filter_initialized = true;
                 last_sample_us = now_us;
             } else {
@@ -2829,7 +2859,10 @@ static void scale_task(void *argument)
                 float change_g = (float)(raw_delta < 0 ? -raw_delta : raw_delta) / abs_factor;
 
                 const int direction = raw_delta > 0 ? 1 : (raw_delta < 0 ? -1 : 0);
-                if (change_g >= 0.40f) {
+                /* Directional voting distinguishes a real gradual pour from
+                 * random ADC noise. Three same-direction deviations wake the
+                 * fast path; a multi-gram change does so immediately. */
+                if (change_g >= 0.10f) {
                     if (direction == movement_direction) {
                         movement_votes++;
                     } else {
@@ -2840,19 +2873,28 @@ static void scale_task(void *argument)
                     movement_votes = 0;
                     movement_direction = 0;
                 }
-                if (change_g > 5.0f || movement_votes >= 4) {
-                    moving_until_us = now_us + 300000;
+                if (change_g > 2.0f || movement_votes >= 3) {
+                    moving_until_us = now_us + 180000;
                 }
                 scale_is_moving = now_us < moving_until_us;
 
                 const int32_t previous_filtered = filtered_relative;
                 if (scale_is_moving) {
                     filtered_relative = candidate;
+                    settled_index = 0;
+                    settled_count = 0;
                 } else {
-                    /* Stronger stationary smoothing removes sub-gram jitter.
-                     * Confirmed motion immediately switches back to the fast
-                     * median path, preserving responsive pours. */
-                    filtered_relative += (candidate - filtered_relative) / 16;
+                    /* A finite 16-reading window reaches the true settled
+                     * value in about 200 ms at 80 SPS. Unlike the former
+                     * 1/16 IIR it has no long tail, while averaging enough
+                     * conversions to suppress visible tenth-gram jitter. */
+                    settled_samples[settled_index] = candidate;
+                    settled_index = (settled_index + 1) % 16;
+                    if (settled_count < 16) settled_count++;
+                    int64_t settled_total = 0;
+                    for (int i = 0; i < settled_count; ++i)
+                        settled_total += settled_samples[i];
+                    filtered_relative = (int32_t)(settled_total / settled_count);
                 }
 
                 const float dt = (float)(now_us - last_sample_us) / 1000000.0f;
