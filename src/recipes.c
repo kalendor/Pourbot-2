@@ -56,11 +56,6 @@ static void persist(void)
     nvs_close(handle);
 }
 
-const pourbot_recipe_t *pourbot_recipe_get(uint8_t index)
-{
-    return index < POURBOT_RECIPE_COUNT ? &recipes[index] : &recipes[0];
-}
-
 const pourbot_recipe_t *pourbot_recipe_active(void) { return &recipes[0]; }
 uint8_t pourbot_recipe_active_index(void) { return 0; }
 

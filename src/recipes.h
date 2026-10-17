@@ -14,7 +14,6 @@ typedef struct {
 } pourbot_recipe_t;
 
 void pourbot_recipes_load(void);
-const pourbot_recipe_t *pourbot_recipe_get(uint8_t index);
 const pourbot_recipe_t *pourbot_recipe_active(void);
 uint8_t pourbot_recipe_active_index(void);
 void pourbot_recipe_save_and_select(uint8_t index, const pourbot_recipe_t *recipe);
