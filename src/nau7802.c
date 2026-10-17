@@ -99,7 +99,9 @@ bool nau7802_init(void)
     }
 
     /* SparkFun's proven initialization sequence: reset, power analog and
-     * digital sections, 3.3 V LDO, gain 128, 80 SPS, then calibrate the AFE. */
+     * digital sections, 3.3 V LDO, gain 128, then calibrate the AFE. 40 SPS
+     * retains ample response for hand pouring while reducing the conversion
+     * bandwidth (and visible load-cell noise) compared with 80 SPS. */
     if (!update_reg(REG_PU_CTRL, 0, PU_RR)) {
         ESP_LOGE(TAG, "NAU7802 reset failed");
         return false;
@@ -112,7 +114,7 @@ bool nau7802_init(void)
         !update_reg(REG_PU_CTRL, 0, PU_CS) ||
         !update_reg(REG_CTRL1, 0x3F, (4U << 3) | 7U) ||
         !update_reg(REG_PU_CTRL, 0, PU_AVDDS) ||
-        !update_reg(REG_CTRL2, 0x70, (3U << 4)) ||
+        !update_reg(REG_CTRL2, 0x70, (2U << 4)) ||
         !update_reg(REG_ADC, 0, 0x30) ||
         !update_reg(REG_PGA_PWR, 0, 0x80) ||
         !update_reg(REG_PGA, (1U << 6), 0)) {
@@ -139,7 +141,7 @@ bool nau7802_init(void)
         ESP_LOGW(TAG, "Unexpected NAU7802 revision 0x%02X; continuing", revision);
     }
     initialized = true;
-    ESP_LOGI(TAG, "NAU7802 ready at 80 SPS, gain 128");
+    ESP_LOGI(TAG, "NAU7802 ready at 40 SPS, gain 128");
     return true;
 }
 

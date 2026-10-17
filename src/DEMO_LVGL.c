@@ -111,6 +111,8 @@ static uint8_t recipe_edit_index;
 static int32_t stable_weight_tenths = INT32_MIN;
 static int32_t pending_weight_tenths = INT32_MIN;
 static int64_t pending_weight_since_us;
+static int32_t pending_weight_sum;
+static uint16_t pending_weight_count;
 static volatile bool scale_is_moving;
 static volatile float scale_flow_gps;
 static lv_timer_t *overlay_timer;
@@ -2354,30 +2356,57 @@ static void update_ui(bool connected, int32_t relative)
                 ? 0 : measured_tenths - stable_weight_tenths;
             const int32_t abs_display_delta_tenths = display_delta_tenths < 0
                 ? -display_delta_tenths : display_delta_tenths;
-            if (stable_weight_tenths == INT32_MIN || scale_is_moving) {
+            if (stable_weight_tenths == INT32_MIN ||
+                (brew_running && scale_is_moving)) {
                 pending_weight_tenths = INT32_MIN;
+                pending_weight_sum = 0;
+                pending_weight_count = 0;
             }
             if ((!scale_is_moving && abs_grams < 0.40f) ||
                 (stable_weight_tenths == 0 && !scale_is_moving && abs_grams < 0.50f)) {
                 stable_weight_tenths = 0;
                 pending_weight_tenths = INT32_MIN;
-            } else if (stable_weight_tenths == INT32_MIN || scale_is_moving ||
-                       abs_display_delta_tenths >= 5) {
+                pending_weight_sum = 0;
+                pending_weight_count = 0;
+            } else if (stable_weight_tenths == INT32_MIN ||
+                       (brew_running && scale_is_moving) ||
+                       abs_display_delta_tenths >= 10) {
                 stable_weight_tenths = measured_tenths;
                 pending_weight_tenths = INT32_MIN;
-            } else if (measured_tenths != stable_weight_tenths) {
-                /* Compare integer tenths instead of floating-point boundaries.
-                 * A true 100.0 reading can now advance a latched 99.9 after it
-                 * persists, while alternating noise is still rejected. */
-                if (pending_weight_tenths != measured_tenths) {
+                pending_weight_sum = 0;
+                pending_weight_count = 0;
+            } else if (abs_display_delta_tenths > 2) {
+                /* Do not require every noisy tenth to be identical. Average a
+                 * complete stationary window, then move the display only when
+                 * its center is more than 0.2 g from the latched value. */
+                const int direction = display_delta_tenths > 0 ? 1 : -1;
+                if (pending_weight_tenths == INT32_MIN ||
+                    (pending_weight_tenths > stable_weight_tenths ? 1 : -1) != direction) {
                     pending_weight_tenths = measured_tenths;
                     pending_weight_since_us = output_now_us;
-                } else if (output_now_us - pending_weight_since_us >= 250000) {
-                    stable_weight_tenths = measured_tenths;
+                    pending_weight_sum = measured_tenths;
+                    pending_weight_count = 1;
+                } else {
+                    pending_weight_sum += measured_tenths;
+                    if (pending_weight_count < UINT16_MAX) pending_weight_count++;
+                }
+                if (output_now_us - pending_weight_since_us >= 700000 &&
+                    pending_weight_count >= 4) {
+                    const int32_t average_tenths = pending_weight_sum >= 0
+                        ? (pending_weight_sum + pending_weight_count / 2) / pending_weight_count
+                        : (pending_weight_sum - pending_weight_count / 2) / pending_weight_count;
+                    if (average_tenths - stable_weight_tenths > 2 ||
+                        stable_weight_tenths - average_tenths > 2) {
+                        stable_weight_tenths = average_tenths;
+                    }
                     pending_weight_tenths = INT32_MIN;
+                    pending_weight_sum = 0;
+                    pending_weight_count = 0;
                 }
             } else {
                 pending_weight_tenths = INT32_MIN;
+                pending_weight_sum = 0;
+                pending_weight_count = 0;
             }
             const float shown_grams = (float)stable_weight_tenths / 10.0f;
             char weight_text[20];
@@ -2647,9 +2676,8 @@ static void scale_task(void *argument)
                 filter_initialized = true;
                 last_sample_us = now_us;
             } else {
-                /* At 80 SPS the NAU7802 exposes more short ADC noise than the
-                 * old HX711 path. Median-of-five rejects one- and two-sample
-                 * excursions while adding only about 25 ms of latency. */
+                /* At 40 SPS, median-of-five rejects one- and two-sample
+                 * excursions while retaining quick response to a real load. */
                 samples[sample_index] = raw_relative;
                 sample_index = (sample_index + 1) % 5;
                 const int32_t candidate = median5(samples);
