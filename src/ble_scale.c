@@ -270,7 +270,9 @@ bool pourbot_ble_start(void)
     ble_svc_gatt_init();
     if (ble_gatts_count_cfg(services) != 0 || ble_gatts_add_svcs(services) != 0)
         return false;
-    if (ble_svc_gap_device_name_set("BOOKOO PourBot") != 0) return false;
+    /* Gaggiuino identifies Bookoo scales by their exact GAP name. Both the
+     * Themis Mini and Themis Ultra advertise simply as "BOOKOO". */
+    if (ble_svc_gap_device_name_set("BOOKOO") != 0) return false;
     nimble_port_freertos_init(host_task);
     xTaskCreate(notify_task, "ble_scale", 3072, NULL, 3, NULL);
     return true;

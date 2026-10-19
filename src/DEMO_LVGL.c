@@ -1240,7 +1240,7 @@ static void settings_event_cb(lv_event_t *event)
     ble_toggle_label = lv_obj_get_child(ble_toggle, 0);
     lv_obj_set_ext_click_area(ble_toggle, 8);
     lv_obj_t *ble_hint = lv_label_create(card);
-    lv_label_set_text(ble_hint, "Advertises as\nBOOKOO PourBot");
+    lv_label_set_text(ble_hint, "Advertises exactly as\nBOOKOO");
     lv_obj_set_width(ble_hint, 176);
     lv_obj_set_style_text_font(ble_hint, &lv_font_montserrat_10, 0);
     lv_obj_set_style_text_color(ble_hint, lv_color_hex(0x64748B), 0);
