@@ -218,9 +218,6 @@ static void battery_task(void *argument)
     unsigned consecutive_read_failures = 0;
     unsigned charging_votes = 0;
     unsigned not_charging_votes = 0;
-    uint16_t previous_battery_mv = 0;
-    int64_t charging_evidence_until_us = 0;
-    bool charger_disconnect_seen = false;
     while (!standby_active) {
         battery_gauge_sample_t sample;
         /* I2C never runs in the scale task or while holding the LVGL mutex. */
@@ -240,9 +237,6 @@ static void battery_task(void *argument)
                 consecutive_read_failures = 0;
                 charging_votes = 0;
                 not_charging_votes = 0;
-                previous_battery_mv = 0;
-                charging_evidence_until_us = 0;
-                charger_disconnect_seen = false;
             }
         } else if (!gauge_online) {
             ESP_LOGI(TAG, "MAX17048 detected: %u%%, %u mV", sample.percent,
@@ -259,43 +253,24 @@ static void battery_task(void *argument)
             charging_votes = 0;
             not_charging_votes = 0;
         } else {
-            const int64_t now_us = esp_timer_get_time();
-            const bool voltage_rising = previous_battery_mv != 0 &&
-                sample.millivolts >= previous_battery_mv + 3;
-            const bool voltage_falling = previous_battery_mv != 0 &&
-                sample.millivolts + 3 <= previous_battery_mv;
-
-            /* CRATE can lag after USB is unplugged and immediately replugged.
-             * A 3 mV upward cell step is independent evidence that charging
-             * resumed; latch it briefly while ModelGauge catches up. */
-            if (voltage_falling) {
-                charger_disconnect_seen = charger_disconnect_seen || next_charging;
-                next_charging = false;
-                charging_evidence_until_us = 0;
+            /* MAX17048 CRATE is an estimate rather than a charger-presence
+             * input. Require three consecutive readings above +2%/h before
+             * showing CHG, and three readings at or below zero before clearing
+             * it. The gap between those thresholds supplies hysteresis. */
+            if (sample.charging) {
+                if (charging_votes < 3) charging_votes++;
+                not_charging_votes = 0;
+                if (charging_votes >= 3) next_charging = true;
+            } else if (sample.rate_tenths_per_hour <= 0) {
+                if (not_charging_votes < 3) not_charging_votes++;
                 charging_votes = 0;
-                not_charging_votes = 0;
-            } else if (voltage_rising && charger_disconnect_seen) {
-                next_charging = true;
-                charging_evidence_until_us = now_us + 30000000;
-                charger_disconnect_seen = false;
-                charging_votes = 0;
-                not_charging_votes = 0;
-            } else if (sample.charging) {
-                if (charging_votes < 2) charging_votes++;
-                not_charging_votes = 0;
-                if (charging_votes >= 2) {
-                    next_charging = true;
-                    charging_evidence_until_us = now_us + 10000000;
-                }
-            } else if (now_us < charging_evidence_until_us) {
-                charging_votes = 0;
-                not_charging_votes = 0;
+                if (not_charging_votes >= 3) next_charging = false;
             } else {
-                if (not_charging_votes < 2) not_charging_votes++;
+                /* The neutral band (0..2%/h) does not change an established
+                 * state, but it cannot help a new state accumulate votes. */
                 charging_votes = 0;
-                if (not_charging_votes >= 2) next_charging = false;
+                not_charging_votes = 0;
             }
-            previous_battery_mv = sample.millivolts;
         }
         /* Do not discard a good reading just because LVGL is busy during
          * startup. Wait for the UI lock; subsequent samples remain infrequent. */
