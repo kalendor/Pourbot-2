@@ -10,10 +10,8 @@
 #include "esp_https_ota.h"
 #include "esp_system.h"
 #include "freertos/FreeRTOS.h"
-#include "freertos/idf_additions.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
-#include "ble_scale.h"
 #include "wifi_manager.h"
 
 #define OTA_URL "https://kalendor.github.io/Pourbot-2/firmware/firmware.bin"
@@ -57,14 +55,7 @@ static void ota_task(void *argument)
     pourbot_wifi_status(&wifi);
     if (!wifi.connected) {
         status_set(false, true, false, 0, "Connect to Wi-Fi before updating");
-        vTaskDeleteWithCaps(NULL);
-    }
-
-    status_set(true, false, false, 0, "Preparing memory for update...");
-    if (!pourbot_ble_stop_for_ota()) {
-        status_set(false, true, false, 0,
-                   "Could not release Bluetooth memory - restart PourBot");
-        vTaskDeleteWithCaps(NULL);
+        vTaskDelete(NULL);
     }
 
     const esp_http_client_config_t http = {
@@ -95,7 +86,7 @@ static void ota_task(void *argument)
         snprintf(message, sizeof(message), "Update connection failed: %s (0x%x)",
                  esp_err_to_name(err), (unsigned)err);
         status_set(false, true, false, 0, message);
-        vTaskDeleteWithCaps(NULL);
+        vTaskDelete(NULL);
     }
 
     esp_app_desc_t incoming = {0};
@@ -103,7 +94,7 @@ static void ota_task(void *argument)
     if (err != ESP_OK) {
         esp_https_ota_abort(handle);
         status_set(false, true, false, 0, "Could not read the update image");
-        vTaskDeleteWithCaps(NULL);
+        vTaskDelete(NULL);
     }
     xSemaphoreTake(ota_mutex, portMAX_DELAY);
     strlcpy(ota_status.available_version, incoming.version,
@@ -114,7 +105,7 @@ static void ota_task(void *argument)
         !parse_version(esp_app_get_description()->version, current)) {
         esp_https_ota_abort(handle);
         status_set(false, true, false, 0, "Cannot compare firmware versions");
-        vTaskDeleteWithCaps(NULL);
+        vTaskDelete(NULL);
     }
     int comparison = 0;
     for (int i = 0; i < 3; ++i) {
@@ -130,7 +121,7 @@ static void ota_task(void *argument)
         xSemaphoreGive(ota_mutex);
         status_set(false, true, true, 0, comparison == 0 ?
                    "PourBot is already up to date" : "Installed version is newer than GitHub");
-        vTaskDeleteWithCaps(NULL);
+        vTaskDelete(NULL);
     }
     if (!install) {
         esp_https_ota_abort(handle);
@@ -138,7 +129,7 @@ static void ota_task(void *argument)
         ota_status.update_available = true;
         xSemaphoreGive(ota_mutex);
         status_set(false, true, true, 0, "New firmware is ready to install");
-        vTaskDeleteWithCaps(NULL);
+        vTaskDelete(NULL);
     }
 
     status_set(true, false, false, 1, "Downloading update - keep power connected");
@@ -153,12 +144,12 @@ static void ota_task(void *argument)
     if (err != ESP_OK || !esp_https_ota_is_complete_data_received(handle)) {
         esp_https_ota_abort(handle);
         status_set(false, true, false, -1, "Download failed - current firmware is unchanged");
-        vTaskDeleteWithCaps(NULL);
+        vTaskDelete(NULL);
     }
     err = esp_https_ota_finish(handle);
     if (err != ESP_OK) {
         status_set(false, true, false, -1, "Update validation failed - current firmware is unchanged");
-        vTaskDeleteWithCaps(NULL);
+        vTaskDelete(NULL);
     }
     status_set(false, true, true, 100, "Update installed - restarting...");
     vTaskDelay(pdMS_TO_TICKS(2500));
@@ -191,13 +182,7 @@ static bool ota_start(bool install)
     }
     xSemaphoreGive(ota_mutex);
     if (busy) return false;
-    /* Bluetooth reserves a substantial portion of internal RAM. The ESP32-S3
-     * is configured to permit external task stacks, so keep the OTA worker's
-     * comparatively large TLS stack in PSRAM and leave internal RAM available
-     * for Wi-Fi, TLS DMA buffers, and the BLE controller. */
-    if (xTaskCreateWithCaps(ota_task, "pour_ota", 8192,
-                            (void *)(uintptr_t)install, 2, NULL,
-                            MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) != pdPASS) {
+    if (xTaskCreate(ota_task, "pour_ota", 8192, (void *)(uintptr_t)install, 2, NULL) != pdPASS) {
         status_set(false, true, false, 0, "Not enough memory to start update");
         return false;
     }

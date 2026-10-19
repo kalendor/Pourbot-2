@@ -3,7 +3,6 @@
 
 set(app_sources
     DEMO_LVGL.c
-    ble_scale.c
     nau7802.c
     battery_gauge.c
     pour_archive.c
@@ -18,5 +17,5 @@ set(app_sources
     font_weight_72.c)
 
 idf_component_register(SRCS ${app_sources}
-                       REQUIRES nvs_flash esp_wifi esp_netif esp_event lwip fatfs sdmmc driver bt
+                       REQUIRES nvs_flash esp_wifi esp_netif esp_event lwip fatfs sdmmc driver
                                 esp_https_ota app_update mbedtls)

@@ -10,7 +10,6 @@
 #include "display.h"
 #include "battery_gauge.h"
 #include "nau7802.h"
-#include "ble_scale.h"
 #include "pour_archive.h"
 #include "ota_manager.h"
 #include "wifi_manager.h"
@@ -125,7 +124,6 @@ static pourbot_wifi_status_t wifi_ui_status;
 static lv_obj_t *analytics_body, *analytics_status_label;
 static lv_obj_t *ota_status_label, *ota_progress_bar, *ota_install_button;
 static lv_obj_t *ota_check_button, *ota_version_table;
-static lv_obj_t *ble_status_label, *ble_toggle_label;
 static pour_archive_result_t *analytics_result;
 static uint32_t analytics_generation;
 static bool analytics_detail_open;
@@ -799,8 +797,6 @@ static void close_overlay(void)
     ota_install_button = NULL;
     ota_check_button = NULL;
     ota_version_table = NULL;
-    ble_status_label = NULL;
-    ble_toggle_label = NULL;
     if (menu_overlay) {
         calibration_status_label = NULL;
         calibration_weight_button = NULL;
@@ -889,7 +885,6 @@ static void standby_task(void *argument)
             ESP_LOGW(TAG, "Standby postponed: SD operation still running");
             continue;
         }
-        pourbot_ble_prepare_sleep();
         pourbot_wifi_stop();
         standby_active = true;
 
@@ -1172,31 +1167,6 @@ static void ota_event_cb(lv_event_t *event)
     ota_ui_timer_cb(NULL);
 }
 
-static void ble_settings_refresh(void)
-{
-    if (!ble_status_label || !ble_toggle_label) return;
-    const bool enabled = pourbot_ble_enabled();
-    const bool connected = pourbot_ble_connected();
-    lv_label_set_text(ble_status_label, !enabled ? "OFF" :
-                      (connected ? "CONNECTED" : "WAITING FOR GAGGIUINO"));
-    lv_obj_set_style_text_color(ble_status_label,
-        lv_color_hex(connected ? 0x4ADE80 : (enabled ? 0xF2B94F : 0x94A3B8)), 0);
-    lv_label_set_text(ble_toggle_label, enabled ? "TURN BLE OFF" : "TURN BLE ON");
-}
-
-static void ble_settings_timer_cb(lv_timer_t *timer)
-{
-    (void)timer;
-    ble_settings_refresh();
-}
-
-static void ble_toggle_event_cb(lv_event_t *event)
-{
-    (void)event;
-    pourbot_ble_set_enabled(!pourbot_ble_enabled());
-    ble_settings_refresh();
-}
-
 static void settings_event_cb(lv_event_t *event)
 {
     (void)event;
@@ -1224,30 +1194,6 @@ static void settings_event_cb(lv_event_t *event)
                         wifi_event_cb);
     small_action_button(card, "OTA UPDATE", 18, 142, 210, 0xB7791F,
                         ota_event_cb);
-
-    lv_obj_t *ble_title = lv_label_create(card);
-    lv_label_set_text(ble_title, "GAGGIUINO BLE");
-    lv_obj_set_style_text_font(ble_title, &lv_font_montserrat_14, 0);
-    lv_obj_set_style_text_color(ble_title, lv_color_hex(0xF8FAFC), 0);
-    lv_obj_align(ble_title, LV_ALIGN_TOP_LEFT, 252, 20);
-    ble_status_label = lv_label_create(card);
-    lv_obj_set_width(ble_status_label, 168);
-    lv_obj_set_style_text_font(ble_status_label, &lv_font_montserrat_10, 0);
-    lv_obj_set_style_text_align(ble_status_label, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(ble_status_label, LV_ALIGN_TOP_LEFT, 246, 50);
-    lv_obj_t *ble_toggle = small_action_button(card, "", 246, 80, 176,
-                                               0x2563EB, ble_toggle_event_cb);
-    ble_toggle_label = lv_obj_get_child(ble_toggle, 0);
-    lv_obj_set_ext_click_area(ble_toggle, 8);
-    lv_obj_t *ble_hint = lv_label_create(card);
-    lv_label_set_text(ble_hint, "Bookoo-compatible name\nBOOKOO_SC 0000");
-    lv_obj_set_width(ble_hint, 176);
-    lv_obj_set_style_text_font(ble_hint, &lv_font_montserrat_10, 0);
-    lv_obj_set_style_text_color(ble_hint, lv_color_hex(0x64748B), 0);
-    lv_obj_set_style_text_align(ble_hint, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(ble_hint, LV_ALIGN_TOP_LEFT, 246, 137);
-    ble_settings_refresh();
-    overlay_timer = lv_timer_create(ble_settings_timer_cb, 500, NULL);
 }
 
 static void wifi_back_event_cb(lv_event_t *event)
@@ -2610,11 +2556,6 @@ static void scale_task(void *argument)
             }
             next_reconnect_us = loop_now_us + 2000000;
         }
-        if (pourbot_ble_take_tare_request()) {
-            stable_weight_tenths = INT32_MIN;
-            pending_weight_tenths = INT32_MIN;
-            tare_requested = true;
-        }
         if (calibration_tare_requested) {
             int32_t new_offset;
             bool ok = nau7802_average(&new_offset, 64);
@@ -2827,9 +2768,6 @@ static void scale_task(void *argument)
                 }
                 last_sample_us = now_us;
             }
-            const float ble_weight = calibration_factor != 0.0f
-                ? (float)filtered_relative / calibration_factor : 0.0f;
-            pourbot_ble_update(ble_weight, scale_flow_gps, battery_percent);
             update_ui(true, filtered_relative);
         } else {
             if (++read_failures >= 8) {
@@ -2951,7 +2889,6 @@ void app_main(void)
     xTaskCreate(battery_task, "battery_task", 3072, NULL, 2, NULL);
     archive_ready = pour_archive_start();
     if (!pourbot_wifi_start()) ESP_LOGW(TAG, "Wi-Fi task unavailable");
-    if (!pourbot_ble_start()) ESP_LOGW(TAG, "Bluetooth scale unavailable");
     /* The display, scale UI, workers, and networking have initialized. An OTA
      * image that reached this checkpoint is healthy enough to keep. */
     esp_ota_mark_app_valid_cancel_rollback();
