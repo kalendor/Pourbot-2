@@ -13,6 +13,7 @@
 #include "freertos/idf_additions.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
+#include "ble_scale.h"
 #include "wifi_manager.h"
 
 #define OTA_URL "https://kalendor.github.io/Pourbot-2/firmware/firmware.bin"
@@ -56,6 +57,13 @@ static void ota_task(void *argument)
     pourbot_wifi_status(&wifi);
     if (!wifi.connected) {
         status_set(false, true, false, 0, "Connect to Wi-Fi before updating");
+        vTaskDeleteWithCaps(NULL);
+    }
+
+    status_set(true, false, false, 0, "Preparing memory for update...");
+    if (!pourbot_ble_stop_for_ota()) {
+        status_set(false, true, false, 0,
+                   "Could not release Bluetooth memory - restart PourBot");
         vTaskDeleteWithCaps(NULL);
     }
 

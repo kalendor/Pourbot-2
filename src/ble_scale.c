@@ -30,6 +30,8 @@ static volatile uint16_t connection_handle = BLE_CONN_NONE;
 static volatile bool notifications_enabled;
 static volatile bool host_synced;
 static volatile bool radio_enabled = true;
+static volatile bool stack_started;
+static volatile bool ota_stopped;
 static volatile bool tare_requested;
 static volatile int32_t weight_hundredths;
 static volatile int16_t flow_hundredths;
@@ -38,6 +40,7 @@ static volatile bool timer_running;
 static int64_t timer_started_us;
 static uint32_t timer_elapsed_ms;
 static uint8_t own_addr_type;
+static TaskHandle_t notify_task_handle;
 
 static void advertise(void);
 
@@ -200,7 +203,8 @@ static int gap_event(struct ble_gap_event *event, void *arg)
 
 static void advertise(void)
 {
-    if (!host_synced || !radio_enabled || connection_handle != BLE_CONN_NONE ||
+    if (!host_synced || !radio_enabled || ota_stopped ||
+        connection_handle != BLE_CONN_NONE ||
         ble_gap_adv_active()) return;
     struct ble_hs_adv_fields fields = {0};
     const char *name = ble_svc_gap_device_name();
@@ -265,6 +269,8 @@ bool pourbot_ble_start(void)
 {
     load_enabled();
     if (nimble_port_init() != ESP_OK) return false;
+    stack_started = true;
+    ota_stopped = false;
     ble_hs_cfg.sync_cb = on_sync;
     ble_svc_gap_init();
     ble_svc_gatt_init();
@@ -274,7 +280,8 @@ bool pourbot_ble_start(void)
      * follows the Themis Mini's documented "BOOKOO_SC xxxx" GAP format. */
     if (ble_svc_gap_device_name_set("BOOKOO_SC 0000") != 0) return false;
     nimble_port_freertos_init(host_task);
-    xTaskCreate(notify_task, "ble_scale", 3072, NULL, 3, NULL);
+    xTaskCreate(notify_task, "ble_scale", 3072, NULL, 3,
+                &notify_task_handle);
     return true;
 }
 
@@ -325,5 +332,33 @@ void pourbot_ble_prepare_sleep(void)
     ble_gap_adv_stop();
     uint16_t conn = connection_handle;
     if (conn != BLE_CONN_NONE) ble_gap_terminate(conn, BLE_ERR_REM_USER_CONN_TERM);
+}
+
+bool pourbot_ble_stop_for_ota(void)
+{
+    if (!stack_started || ota_stopped) return true;
+    ota_stopped = true;
+    if (notify_task_handle) {
+        vTaskDelete(notify_task_handle);
+        notify_task_handle = NULL;
+    }
+    ble_gap_adv_stop();
+    int rc = nimble_port_stop();
+    if (rc != 0) {
+        ESP_LOGE(TAG, "Could not stop BLE for OTA: %d", rc);
+        return false;
+    }
+    esp_err_t err = nimble_port_deinit();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Could not release BLE memory for OTA: %s",
+                 esp_err_to_name(err));
+        return false;
+    }
+    stack_started = false;
+    host_synced = false;
+    notifications_enabled = false;
+    connection_handle = BLE_CONN_NONE;
+    ESP_LOGI(TAG, "BLE stopped and memory released for OTA");
+    return true;
 }
 

@@ -10,4 +10,5 @@ bool pourbot_ble_connected(void);
 bool pourbot_ble_take_tare_request(void);
 void pourbot_ble_update(float weight_g, float flow_gps, int battery_percent);
 void pourbot_ble_prepare_sleep(void);
+bool pourbot_ble_stop_for_ota(void);
 
